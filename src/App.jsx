@@ -861,6 +861,48 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
   const currentRiskColor = riskColorFor(strainer.riskAnalysis.impact, strainer.riskAnalysis.probability);
   const recentEvents = strainer.recentEvents ?? [];
   const latestLive = liveItems.length ? liveItems[liveItems.length - 1] : null;
+  const fleetRiskSummary = useMemo(() => {
+    if (!fleet.length) return null;
+    const statusCounts = { alert: 0, warning: 0, normal: 0, other: 0 };
+    const cellCounts = {};
+    const selectedImpact = toTitleLevel(strainer?.riskAnalysis?.impact);
+    const selectedProbability = toTitleLevel(strainer?.riskAnalysis?.probability);
+    let sameCellCount = 0;
+    let dominantKey = null;
+
+    fleet.forEach((item) => {
+      if (!item) return;
+      const impact = toTitleLevel(item?.riskAnalysis?.impact);
+      const probability = toTitleLevel(item?.riskAnalysis?.probability);
+      const key = `${impact}|${probability}`;
+      cellCounts[key] = (cellCounts[key] || 0) + 1;
+      if (!dominantKey || cellCounts[key] > (cellCounts[dominantKey] || 0)) {
+        dominantKey = key;
+      }
+      if (impact === selectedImpact && probability === selectedProbability) {
+        sameCellCount += 1;
+      }
+      const status = String(item.status || "other").toLowerCase();
+      if (statusCounts[status] !== undefined) {
+        statusCounts[status] += 1;
+      } else {
+        statusCounts.other += 1;
+      }
+    });
+
+    const [dominantImpact, dominantProbability] = dominantKey ? dominantKey.split("|") : [selectedImpact, selectedProbability];
+
+    return {
+      total: fleet.length,
+      statusCounts,
+      selectedImpact,
+      selectedProbability,
+      sameCellCount,
+      dominantImpact,
+      dominantProbability,
+      dominantCount: dominantKey ? cellCounts[dominantKey] : sameCellCount,
+    };
+  }, [fleet, strainer?.riskAnalysis?.impact, strainer?.riskAnalysis?.probability]);
   return (
     <div className="h-full overflow-y-auto bg-slate-950/40 p-6">
       <div className="flex items-start justify-between border-b border-white/10 pb-4">
@@ -921,8 +963,49 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
             />
         </div>
       </div>
-      <div className="mt-6">
+      <div className="my-10 space-y-4">
         <RiskMatrix fleet={fleet} selected={strainer} />
+        {fleetRiskSummary && (
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-inner">
+            <div className="text-sm font-semibold text-white">Matrix Overview</div>
+            <p className="mt-2 text-xs leading-relaxed text-gray-300">
+              {strainer.id} sits in the{" "}
+              <span className="text-sky-300">
+                {fleetRiskSummary.selectedImpact} impact / {fleetRiskSummary.selectedProbability} probability
+              </span>{" "}
+              cell alongside {fleetRiskSummary.sameCellCount}{" "}
+              {fleetRiskSummary.sameCellCount === 1 ? "peer" : "peers"} across the fleet. The densest cluster is{" "}
+              <span className="text-emerald-300">
+                {fleetRiskSummary.dominantImpact} impact / {fleetRiskSummary.dominantProbability} probability
+              </span>{" "}
+              with {fleetRiskSummary.dominantCount} {fleetRiskSummary.dominantCount === 1 ? "asset" : "assets"}.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide">
+              <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-red-300">
+                <span className="text-gray-400">Alerts</span>
+                <span>{fleetRiskSummary.statusCounts.alert}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-amber-300">
+                <span className="text-gray-400">Warnings</span>
+                <span>{fleetRiskSummary.statusCounts.warning}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-emerald-300">
+                <span className="text-gray-400">Normal</span>
+                <span>{fleetRiskSummary.statusCounts.normal}</span>
+              </div>
+              {fleetRiskSummary.statusCounts.other > 0 && (
+                <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-slate-200">
+                  <span className="text-gray-400">Other</span>
+                  <span>{fleetRiskSummary.statusCounts.other}</span>
+                </div>
+              )}
+              <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-sky-200">
+                <span className="text-gray-400">Total</span>
+                <span>{fleetRiskSummary.total}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-6 space-y-4">
@@ -1696,7 +1779,7 @@ export default function App() {
           </section>
         )}
         <section className="flex min-h-[600px] flex-1 gap-6">
-          <aside className="w-full shrink-0 rounded-3xl border border-white/10 bg-white/5 p-5 text-sm shadow-inner lg:w-72 xl:w-80">
+          <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-3xl border border-white/10 bg-white/5 p-5 text-sm shadow-inner lg:w-72 xl:w-80">
             <div className="text-lg font-semibold text-white">Strainer Fleet</div>
             <div className="relative mt-4">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -1726,7 +1809,7 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div className="mt-5 space-y-3 overflow-y-auto pr-1" style={{ maxHeight: "calc(100vh - 240px)" }}>
+            <div className="mt-5 flex-1 space-y-3 overflow-y-auto pr-1">
               {filteredStrainers.map((strainer) => (
                 <StrainerCard
                   key={strainer.id}
