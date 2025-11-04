@@ -1,0 +1,16 @@
+{
+  "now": "2022-12-31 23:45:00",
+  "regime": "low_load",
+  "prob_breach7d": 0.9540827456170158,
+  "threshold_eff": 0.45,
+  "risk_band": "High",
+  "persistence_k": 5,
+  "cooldown_hours": 48,
+  "base_threshold": 0.25,
+  "regime_threshold_multipliers": {
+    "normal": 1.4,
+    "post_startup": 1.6,
+    "low_load": 1.7,
+    "shutdown": 1.8
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "config": {
+    "DATA_PATH": "/kaggle/input/centrifugal-compressors/centrifugal_compressor.xlsx",
+    "OUT_DIR": "./outputs",
+    "FIG_DIR": "./outputs/figures",
+    "ARTIFACT_DIR": "./outputs/artifacts",
+    "RANDOM_STATE": 42,
+    "EXPECTED_FREQ": "15min",
+    "DP_UNIT": "mbar",
+    "DP_MBAR_MULT": 1.0,
+    "DP_LIMIT_MBAR": 50.0,
+    "FIG_DPI": 300
+  },
+  "n_rows": 35040,
+  "n_cols": 25,
+  "index_start": "2022-01-01 00:00:00",
+  "index_end": "2022-12-31 23:45:00",
+  "dp_column": "75PDI853.pv",
+  "columns": [
+    "75ZI800BA.pv",
+    "75ZI800BB.pv",
+    "75ZI801BA.pv",
+    "75ZI801BB.pv",
+    "75PI808.pv",
+    "75PI823.pv",
+    "75PI870.pv",
+    "75PI845.pv",
+    "75PDI853.pv",
+    "75TI821.pv",
+    "75TI822.pv",
+    "75TI827.pv",
+    "75TI828.pv",
+    "75TI824.pv",
+    "75TI829.pv",
+    "75TI830.pv",
+    "75TI831.pv",
+    "75TI832.pv",
+    "75TI836.pv",
+    "75TI834.pv",
+    "75XI821BX.pv",
+    "75XI822BY.pv",
+    "75XI823BX.pv",
+    "75XI824BX.pv",
+    "75SI865R.pv"
+  ],
+  "feature_windows": {
+    "short": 8,
+    "med": 32,
+    "long": 96,
+    "lags": [
+      1,
+      4,
+      8
+    ]
+  },
+  "dt_hours": 0.25,
+  "health_bands": {
+    "critical": 75.0,
+    "warning": 85.0
+  },
+  "if_features": [
+    "75PI845.pv",
+    "75PI870.pv",
+    "75TI834.pv",
+    "75TI836.pv",
+    "75XI822BY.pv",
+    "75ZI801BB.pv",
+    "75PI808.pv",
+    "75XI821BX.pv",
+    "75PI823.pv",
+    "75ZI800BB.pv",
+    "75TI821.pv",
+    "75TI822.pv",
+    "75ZI800BA.pv",
+    "75TI827.pv",
+    "75TI831.pv",
+    "75ZI801BA.pv",
+    "75TI829.pv",
+    "75TI832.pv",
+    "75TI824.pv",
+    "75XI824BX.pv",
+    "75PDI853.pv",
+    "75TI828.pv",
+    "75TI830.pv",
+    "75SI865R.pv",
+    "75XI823BX.pv",
+    "dp_excess_mbar",
+    "dp_baseline_mbar",
+    "dp_auc_cum_mbar_h"
+  ],
+  "lstm_cols": [
+    "75PDI853.pv",
+    "75ZI800BB.pv",
+    "75TI836.pv",
+    "75ZI800BA.pv",
+    "75PI870.pv",
+    "75TI834.pv"
+  ],
+  "lstm_window": 64,
+  "limits_mbar": {
+    "7d": 2.3099147391319272
+  },
+  "best_thresholds": {
+    "degraded": 0.1,
+    "breach7d": 0.05
+  },
+  "labeling_params": {
+    "dp_smooth_hours": 2.0,
+    "event_cooldown_days": 7
+  },
+  "alerting_params": {
+    "persist_k": 3,
+    "cooldown_hours": 48
+  }
+}
