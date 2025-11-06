@@ -33,6 +33,26 @@ import {
   Line,
 } from "recharts";
 import { MOCK_KPI_PAYLOAD } from "./mockKpis";
+
+const resolveBackendBase = () => {
+  const env = import.meta.env || {};
+  if (env.VITE_BACKEND_URL) {
+    return env.VITE_BACKEND_URL.replace(/\/$/, "");
+  }
+  const protocol = (env.VITE_BACKEND_PROTOCOL || (typeof window !== "undefined" ? window.location.protocol : "http:")).replace(/:?$/, ":");
+  const host = env.VITE_BACKEND_HOST || (typeof window !== "undefined" ? window.location.hostname : "127.0.0.1");
+  const port = env.VITE_BACKEND_PORT || "8100";
+  return `${protocol}//${host}${port ? `:${port}` : ""}`;
+};
+
+const API_BASE = resolveBackendBase();
+const buildApiUrl = (path) => {
+  if (!path.startsWith("/")) {
+    return `${API_BASE}/${path}`;
+  }
+  return `${API_BASE}${path}`;
+};
+const apiFetch = (path, options) => fetch(buildApiUrl(path), options);
 const PSI_PER_MBAR = 0.0145038;
 const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -805,7 +825,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
           m_low: multipliers.low_load.toString(),
           m_shut: multipliers.shutdown.toString(),
         });
-        const resp = await fetch(`/api/kpis?${params.toString()}`, { signal: controller.signal });
+        const resp = await apiFetch(`/api/kpis?${params.toString()}`, { signal: controller.signal });
         if (!resp.ok) {
           throw new Error(`Failed to load tuned KPIs (${resp.status})`);
         }
@@ -1613,7 +1633,7 @@ const useDashboardData = () => {
       try {
         setState((prev) => ({ ...prev, loading: true, error: null }));
         try {
-          const summaryResp = await fetch("/api/summary");
+          const summaryResp = await apiFetch("/api/summary");
           if (summaryResp.ok) {
             summary = await summaryResp.json();
           }
@@ -1621,7 +1641,7 @@ const useDashboardData = () => {
           // summary optional for showcase
         }
         try {
-          const kpiResp = await fetch("/api/kpis");
+          const kpiResp = await apiFetch("/api/kpis");
           if (kpiResp.ok) {
             payload = await kpiResp.json();
           } else if (kpiResp.status !== 404) {
