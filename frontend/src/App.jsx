@@ -84,7 +84,7 @@ const riskColorFor = (impact, probability) => {
     "Medium-Low": "bg-emerald-500",
     "Low-Low": "bg-emerald-600",
   };
-  return mapping[key] || "bg-slate-600";
+  return mapping[key] || "bg-slate-700/80";
 };
 const probabilityLevelFromValue = (value) => {
   if (value >= 0.85) return "Very High";
@@ -124,6 +124,13 @@ const LEVEL_LABELS = {
   "very high": "Very High",
 };
 const toTitleLevel = (value) => LEVEL_LABELS[String(value || "medium").toLowerCase()] ?? "Medium";
+const GLASS_CARD = "rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-[0_25px_80px_rgba(2,6,23,0.65)]";
+const GLASS_TILE = "rounded-2xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-[0_15px_45px_rgba(2,6,23,0.55)]";
+const ACCENT_GRADIENT = "bg-gradient-to-br from-indigo-500 via-sky-500 to-emerald-400";
+const ACCENT_TEXT = "bg-gradient-to-r from-sky-300 via-indigo-200 to-emerald-200 bg-clip-text text-transparent";
+const INPUT_BASE =
+  "rounded-2xl border border-white/10 bg-neutral-950/60 text-white placeholder-gray-500 shadow-inner focus:border-sky-400 focus:outline-none focus:ring-0";
+const FILTER_PILL_BASE = "rounded-full border border-white/10 px-3 py-1 text-xs font-semibold transition";
 const regimeColor = (regime) =>
   ({
     normal: "#22c55e",
@@ -418,8 +425,11 @@ const RiskMatrix = ({ fleet = [], selected }) => {
   const formatLabel = (value) => value.replace(/\b\w/g, (char) => char.toUpperCase());
   return (
     <div className="flex w-full justify-center">
-      <div className="w-full max-w-3xl rounded-3xl border border-white/10 bg-slate-950/70 p-4 shadow-inner">
-        <div className="text-lg font-semibold text-sky-300">Fleet Risk Matrix</div>
+      <div className={`w-full max-w-3xl ${GLASS_CARD} p-6`}>
+        <div className="flex items-center gap-3 text-lg font-semibold text-neutral-100">
+          <div className={`${ACCENT_GRADIENT} h-9 w-9 rounded-2xl`} />
+          <span>Fleet Risk Matrix</span>
+        </div>
         <div className="mt-4 grid grid-cols-[auto,repeat(5,minmax(70px,1fr))] gap-2">
           <div className="pr-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Impact</div>
           {probabilityLevels.map((prob) => (
@@ -597,7 +607,7 @@ const createRealStrainer = (kpis, explanation, meta, summary) => {
   };
 };
 const KpiCard = ({ title, value, icon: Icon, color, trend }) => (
-  <div className="rounded-xl border border-white/10 bg-white/5 px-5 py-4 shadow-inner">
+  <div className={`${GLASS_TILE} px-5 py-4`}>
     <div className="flex items-center justify-between">
       <div>
         <div className="text-sm font-semibold uppercase tracking-wide text-gray-400">{title}</div>
@@ -609,7 +619,7 @@ const KpiCard = ({ title, value, icon: Icon, color, trend }) => (
                 ? "text-rose-300"
                 : trend.startsWith("-")
                 ? "text-emerald-300"
-                : "text-blue-300"
+                : "text-sky-300"
             }`}
           >
             {trend}
@@ -617,32 +627,32 @@ const KpiCard = ({ title, value, icon: Icon, color, trend }) => (
         )}
       </div>
       {Icon ? (
-        <div className={`rounded-2xl p-3 shadow-lg ${color || "bg-indigo-500/20"}`}>
-          <Icon size={22} className="text-white" />
+        <div className={`${ACCENT_GRADIENT} rounded-2xl p-[1px] shadow-lg`}>
+          <div className={`flex h-12 w-12 items-center justify-center rounded-[14px] ${color || "bg-indigo-500/20"} text-white`}>
+            <Icon size={22} />
+          </div>
         </div>
       ) : null}
     </div>
   </div>
 );
 const StrainerCard = ({ strainer, onSelect, isSelected }) => {
-  const statusColors = {
-    alert: "border-red-500/60 bg-red-500/10",
-    warning: "border-amber-400/60 bg-amber-400/10",
-    normal: "border-white/10 bg-white/5",
+  const statusGlows = {
+    alert: "ring-rose-500/50 shadow-[0_0_35px_rgba(244,63,94,0.35)]",
+    warning: "ring-amber-400/50 shadow-[0_0_35px_rgba(245,158,11,0.35)]",
+    normal: "ring-emerald-400/40 shadow-[0_0_35px_rgba(16,185,129,0.35)]",
   };
-  const badgeColors = {
-    alert: "bg-red-500",
-    warning: "bg-yellow-500",
-    normal: "bg-emerald-500",
+  const badgeGradients = {
+    alert: "from-rose-500 via-orange-500 to-amber-400",
+    warning: "from-amber-400 via-yellow-400 to-emerald-300",
+    normal: "from-emerald-400 via-sky-400 to-indigo-400",
   };
   return (
     <div
       onClick={() => onSelect(strainer.id)}
-      className={`cursor-pointer rounded-xl border p-4 text-sm transition-all duration-200 ${
-        isSelected
-          ? "border-blue-500/80 bg-blue-500/20 shadow-xl scale-[1.015]"
-          : `${statusColors[strainer.status] || statusColors.normal} hover:bg-white/10`
-      }`}
+      className={`cursor-pointer ${GLASS_TILE} p-4 text-sm transition-all duration-300 ${
+        statusGlows[strainer.status] || ""
+      } ${isSelected ? "scale-[1.02] ring-2 ring-white/80 ring-offset-2 ring-offset-neutral-950" : "hover:bg-white/10"}`}
     >
       <div className="flex items-start justify-between">
         <div>
@@ -651,7 +661,11 @@ const StrainerCard = ({ strainer, onSelect, isSelected }) => {
             {`${strainer.location.unit} \u00B7 ${strainer.location.pump}`}
           </div>
         </div>
-        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold text-white ${badgeColors[strainer.status] || badgeColors.normal}`}>
+        <span
+          className={`rounded-full bg-gradient-to-br px-2 py-0.5 text-xs font-semibold text-white ${
+            badgeGradients[strainer.status] || "from-slate-600 to-slate-700"
+          }`}
+        >
           {strainer.status === "alert" ? "Alert" : strainer.status === "warning" ? "Warning" : "Normal"}
         </span>
       </div>
@@ -683,8 +697,8 @@ const StrainerCard = ({ strainer, onSelect, isSelected }) => {
   );
 };
 const MetricDisplay = ({ icon, label, value, unit, trend }) => (
-  <div className="flex items-start rounded-xl border border-white/10 bg-white/5 p-4">
-    <div className="mr-3 rounded-lg bg-white/10 p-2 text-indigo-200">{icon}</div>
+  <div className={`flex items-start ${GLASS_TILE} p-4`}>
+    <div className={`${ACCENT_GRADIENT} mr-3 rounded-2xl p-2.5 text-white shadow-lg`}>{icon}</div>
     <div className="flex-1">
       <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">{label}</div>
       <div className="mt-1 text-xl font-bold text-white">
@@ -697,7 +711,7 @@ const MetricDisplay = ({ icon, label, value, unit, trend }) => (
               ? "text-rose-300"
               : trend.toLowerCase().startsWith("down")
               ? "text-emerald-300"
-              : "text-blue-300"
+              : "text-sky-300"
           }`}
         >
           {trend}
@@ -708,63 +722,65 @@ const MetricDisplay = ({ icon, label, value, unit, trend }) => (
 );
 
 const AccordionItem = ({ title, icon: Icon, children, defaultOpen = false }) => {
-    const [isOpen, setIsOpen] = useState(defaultOpen);
-    return (
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="flex w-full items-center justify-between p-4 text-left text-lg font-semibold text-white transition-colors hover:bg-white/5"
-            >
-                <div className="flex items-center gap-3">
-                    <Icon size={20} className="text-sky-300" />
-                    <span>{title}</span>
-                </div>
-                <ChevronDown
-                    size={20}
-                    className={`transform text-gray-400 transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`}
-                />
-            </button>
-            <div
-                className={`grid transition-all duration-500 ease-in-out ${
-                    isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                }`}
-            >
-                <div className="overflow-hidden">
-                    <div className="p-4 pt-0">{children}</div>
-                </div>
-            </div>
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  return (
+    <div className={`overflow-hidden ${GLASS_CARD}`}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex w-full items-center justify-between rounded-t-3xl bg-transparent p-5 text-left text-lg font-semibold text-white transition-colors hover:bg-white/5"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`${ACCENT_GRADIENT} flex h-10 w-10 items-center justify-center rounded-2xl text-white`}>
+            <Icon size={20} />
+          </div>
+          <span>{title}</span>
         </div>
-    );
+        <ChevronDown
+          size={20}
+          className={`transform text-gray-400 transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`}
+        />
+      </button>
+      <div
+        className={`grid transition-all duration-500 ease-in-out ${
+          isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="p-5 pt-0">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const GuidanceCard = ({ guidance }) => {
   if (!guidance) return null;
   return (
-    <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-5">
+    <div className={`${GLASS_CARD} bg-gradient-to-br from-indigo-500/10 via-slate-900/40 to-emerald-500/10 p-6`}>
       <div className="flex items-start gap-3">
-        <div className="rounded-lg bg-indigo-500/40 p-2 text-indigo-100">
+        <div className={`${ACCENT_GRADIENT} rounded-2xl p-2.5 text-white shadow-lg`}>
           <Info size={18} />
         </div>
         <div className="flex-1">
-          <div className="text-sm font-semibold uppercase tracking-wide text-indigo-200">
+          <div className="text-sm font-semibold uppercase tracking-wide text-indigo-100">
             Operator Guidance
           </div>
-          <div className="mt-3 grid gap-4 md:grid-cols-2">
+          <div className="mt-3 grid gap-6 md:grid-cols-2">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-200">
+              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-100">
                 Why the model flagged risk
               </div>
-              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-indigo-100">
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-indigo-50">
                 {(guidance.reasons ?? ["DP trend is rising versus regime-adjusted threshold."]).map((reason, idx) => (
                   <li key={`reason-${idx}`}>{reason}</li>
                 ))}
               </ul>
             </div>
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-200">
+              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-100">
                 Suggested actions
               </div>
-              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-indigo-100">
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-indigo-50">
                 {(guidance.actions ?? ["Continue monitoring and follow refinery checklist if persistence increases."]).map(
                   (action, idx) => (
                     <li key={`action-${idx}`}>{action}</li>
@@ -924,7 +940,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
     };
   }, [fleet, strainer?.riskAnalysis?.impact, strainer?.riskAnalysis?.probability]);
   return (
-    <div className="h-full overflow-y-auto bg-slate-950/40 p-6">
+    <div className="h-full overflow-y-auto rounded-3xl bg-transparent p-6">
       <div className="flex items-start justify-between border-b border-white/10 pb-4">
         <div>
           <div className="text-3xl font-extrabold text-white">{strainer.id}</div>
@@ -986,7 +1002,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
       <div className="my-10 space-y-4">
         <RiskMatrix fleet={fleet} selected={strainer} />
         {fleetRiskSummary && (
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-inner">
+          <div className={`${GLASS_TILE} p-4`}>
             <div className="text-sm font-semibold text-white">Matrix Overview</div>
             <p className="mt-2 text-xs leading-relaxed text-gray-300">
               {strainer.id} sits in the{" "}
@@ -1001,25 +1017,25 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
               with {fleetRiskSummary.dominantCount} {fleetRiskSummary.dominantCount === 1 ? "asset" : "assets"}.
             </p>
             <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide">
-              <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-red-300">
+              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-red-300 backdrop-blur">
                 <span className="text-gray-400">Alerts</span>
                 <span>{fleetRiskSummary.statusCounts.alert}</span>
               </div>
-              <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-amber-300">
+              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-amber-300 backdrop-blur">
                 <span className="text-gray-400">Warnings</span>
                 <span>{fleetRiskSummary.statusCounts.warning}</span>
               </div>
-              <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-emerald-300">
+              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-emerald-300 backdrop-blur">
                 <span className="text-gray-400">Normal</span>
                 <span>{fleetRiskSummary.statusCounts.normal}</span>
               </div>
               {fleetRiskSummary.statusCounts.other > 0 && (
-                <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-slate-200">
+                <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-slate-200 backdrop-blur">
                   <span className="text-gray-400">Other</span>
                   <span>{fleetRiskSummary.statusCounts.other}</span>
                 </div>
               )}
-              <div className="flex items-center gap-2 rounded-xl bg-slate-900/60 px-3 py-2 text-sky-200">
+              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sky-200 backdrop-blur">
                 <span className="text-gray-400">Total</span>
                 <span>{fleetRiskSummary.total}</span>
               </div>
@@ -1067,7 +1083,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                         />
                     </div>
                     <div className="grid gap-6 lg:grid-cols-[minmax(260px,320px),1fr]">
-                        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                        <div className={`${GLASS_TILE} p-4`}>
                         <div className="text-sm font-semibold text-white">Alert Tuning</div>
                         <div className="mt-4 space-y-4 text-sm text-gray-200">
                             <div>
@@ -1098,7 +1114,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                                     if (Number.isNaN(next)) return;
                                     setPersistK(clamp(next, 1, 48));
                                 }}
-                                className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-white focus:border-sky-400 focus:outline-none"
+                                className={`mt-1 w-full px-3 py-2 ${INPUT_BASE}`}
                                 />
                             </div>
                             <div>
@@ -1114,7 +1130,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                                     if (Number.isNaN(next)) return;
                                     setCooldownHours(clamp(next, 1, 168));
                                 }}
-                                className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-white focus:border-sky-400 focus:outline-none"
+                                className={`mt-1 w-full px-3 py-2 ${INPUT_BASE}`}
                                 />
                             </div>
                             </div>
@@ -1141,7 +1157,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                                         [key]: clamp(value, 0.5, 2),
                                         }));
                                     }}
-                                    className="w-24 rounded-lg border border-white/10 bg-slate-900/70 px-2 py-1.5 text-right text-white focus:border-sky-400 focus:outline-none"
+                                    className={`w-24 px-2 py-1.5 text-right ${INPUT_BASE}`}
                                     />
                                 </div>
                                 ))}
@@ -1171,7 +1187,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                             {liveError && <div className="text-xs text-red-300">{liveError}</div>}
                         </div>
                         </div>
-                        <div className="rounded-xl border border-white/10 bg-white/5 p-5">
+                        <div className={`${GLASS_TILE} p-5`}>
                         <div className="text-lg font-semibold text-white">Live Probability vs Threshold</div>
                         <div className="mt-4 h-[320px]">
                             <ResponsiveContainer>
@@ -1225,9 +1241,9 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                 </div>
             </AccordionItem>
         )}
-        <div className="hidden">
+         <div className="hidden">
           <AccordionItem title="Performance Trends" icon={TrendIcon} defaultOpen={!hasLive}>
-             <div className="rounded-xl border border-white/10 bg-white/5 p-5">
+             <div className={`${GLASS_TILE} p-5`}>
                 <div className="text-lg font-semibold text-white">DP Trend (Last 30 Days)</div>
                 <div className="mt-4 h-[320px]">
                 <ResponsiveContainer>
@@ -1355,9 +1371,9 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                     </div>
                  </AccordionItem>
                  <AccordionItem title="Causality Analysis (5 Whys)" icon={BrainCircuit}>
-                     <div className="mt-4 rounded-lg bg-slate-900/70 p-3 text-sm text-gray-200">
-                        Problem Statement: {strainer.causalityAnalysis.problemStatement}
-                    </div>
+                     <div className={`mt-4 ${GLASS_TILE} p-3 text-sm text-gray-200`}>
+                         Problem Statement: {strainer.causalityAnalysis.problemStatement}
+                     </div>
                     <div className="mt-4 space-y-3">
                         {strainer.causalityAnalysis.fiveWhys.map((item, idx) => (
                         <div key={`why-${idx}`} className="border-l-2 border-white/20 pl-4">
@@ -1385,7 +1401,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                         <div className="mt-1 text-lg font-bold text-white">{formatDate(strainer.lifecycleInfo.endOfLifeDate)}</div>
                     </div>
                 </div>
-                 <div className="overflow-auto rounded-xl border border-white/10 bg-white/5">
+                 <div className={`overflow-auto ${GLASS_TILE}`}>
                     <div className="p-4 text-sm font-semibold text-white">Cleaning History</div>
                      <table className="min-w-full text-xs">
                         <thead className="bg-white/5 text-gray-400">
@@ -1405,7 +1421,9 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                                     <td className="px-4 py-2 text-emerald-300">{event.dpAfter.toFixed(2)} psi</td>
                                     <td className="px-4 py-2">{event.downtime}</td>
                                     <td className="px-4 py-2">
-                                        <span className="rounded-full bg-slate-700 px-2 py-1 text-xs">{event.debrisType}</span>
+                                        <span className="rounded-full bg-gradient-to-br from-slate-700 to-slate-900 px-2 py-1 text-xs text-white">
+                                            {event.debrisType}
+                                        </span>
                                     </td>
                                 </tr>
                             ))}
@@ -1426,7 +1444,7 @@ const StrainerOverviewPanels = ({ strainer }) => {
   return (
     <div className="space-y-4">
       <AccordionItem title="Performance Trends" icon={TrendIcon} defaultOpen={!hasLive}>
-        <div className="rounded-xl border border-white/10 bg-white/5 p-5">
+        <div className={`${GLASS_TILE} p-5`}>
           <div className="text-lg font-semibold text-white">DP Trend (Last 30 Days)</div>
           <div className="mt-4 h-[320px]">
             <ResponsiveContainer>
@@ -1554,7 +1572,7 @@ const StrainerOverviewPanels = ({ strainer }) => {
             </div>
           </AccordionItem>
           <AccordionItem title="Causality Analysis (5 Whys)" icon={BrainCircuit}>
-            <div className="mt-4 rounded-lg bg-slate-900/70 p-3 text-sm text-gray-200">
+            <div className={`mt-4 ${GLASS_TILE} p-3 text-sm text-gray-200`}>
               Problem Statement: {strainer.causalityAnalysis.problemStatement}
             </div>
             <div className="mt-4 space-y-3">
@@ -1584,7 +1602,7 @@ const StrainerOverviewPanels = ({ strainer }) => {
               <div className="mt-1 text-lg font-bold text-white">{formatDate(strainer.lifecycleInfo.endOfLifeDate)}</div>
             </div>
           </div>
-          <div className="overflow-auto rounded-xl border border-white/10 bg-white/5">
+          <div className={`overflow-auto ${GLASS_TILE}`}>
             <div className="p-4 text-sm font-semibold text-white">Cleaning History</div>
             <table className="min-w-full text-xs">
               <thead className="bg-white/5 text-gray-400">
@@ -1604,7 +1622,9 @@ const StrainerOverviewPanels = ({ strainer }) => {
                     <td className="px-4 py-2 text-emerald-300">{event.dpAfter.toFixed(2)} psi</td>
                     <td className="px-4 py-2">{event.downtime}</td>
                     <td className="px-4 py-2">
-                      <span className="rounded-full bg-slate-700 px-2 py-1 text-xs">{event.debrisType}</span>
+                      <span className="rounded-full bg-gradient-to-br from-slate-700 to-slate-900 px-2 py-1 text-xs text-white">
+                        {event.debrisType}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -1738,21 +1758,32 @@ export default function App() {
     };
   }, [strainerFleet, meta, realStrainer]);
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-gray-950 to-neutral-900 text-white">
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/80 backdrop-blur">
-        <div className="flex w-full items-center justify-between px-6 py-5 sm:px-8 lg:px-12">
+    <div className="min-h-screen bg-gradient-to-br from-neutral-950 via-slate-950 to-black text-neutral-100">
+      <header className="sticky top-0 z-20 border-b border-white/5 bg-neutral-950/80 backdrop-blur-lg">
+        <div className="flex w-full flex-wrap items-center justify-between gap-6 px-6 py-5 sm:px-8 lg:px-12">
           <div>
-            <h1 className="flex items-center text-2xl font-bold text-sky-300">
-              <Filter className="mr-3" size={28} /> Jazan Refinery Strainer Monitoring
-            </h1>
-            <p className="mt-1 text-sm text-gray-400">Refinery-wide strainer performance dashboard</p>
+            <div className="flex items-center gap-3">
+              <div className={`${ACCENT_GRADIENT} flex h-12 w-12 items-center justify-center rounded-2xl text-white shadow-lg`}>
+                <Filter size={24} />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-gray-500">Jazan Refinery</p>
+                <h1 className="text-2xl font-bold text-white">Strainer Monitoring Command</h1>
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-400">
+              <span className={`${ACCENT_GRADIENT} rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white`}>
+                Live Feed
+              </span>
+              <span>Refinery-wide strainer performance dashboard</span>
+            </div>
           </div>
-          <div className="flex items-center gap-4 text-sm">
+          <div className={`flex items-center gap-4 text-sm ${GLASS_TILE} px-4 py-3`}>
             <div className="text-right">
               <div className="text-xs tracking-wide text-gray-400">Operator</div>
               <div className="font-semibold text-white">Ops Team</div>
             </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-500 font-semibold text-white">
+            <div className={`${ACCENT_GRADIENT} flex h-10 w-10 items-center justify-center rounded-full font-semibold text-white shadow-lg`}>
               OP
             </div>
           </div>
@@ -1799,12 +1830,12 @@ export default function App() {
           </section>
         )}
         <section className="flex min-h-[600px] flex-1 gap-6">
-          <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-3xl border border-white/10 bg-white/5 p-5 text-sm shadow-inner lg:w-72 xl:w-80">
+          <aside className={`flex min-h-0 w-full shrink-0 flex-col ${GLASS_CARD} p-5 text-sm lg:w-72 xl:w-80`}>
             <div className="text-lg font-semibold text-white">Strainer Fleet</div>
             <div className="relative mt-4">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
-                className="w-full rounded-lg border border-white/10 bg-slate-900/80 py-2 pl-10 pr-4 text-sm text-white placeholder-gray-400 focus:border-sky-400 focus:outline-none"
+                className={`w-full py-2.5 pl-10 pr-4 text-sm transition ${INPUT_BASE}`}
                 placeholder="Search by ID, unit, pump..."
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
@@ -1815,10 +1846,10 @@ export default function App() {
                 <button
                   key={label}
                   onClick={() => setActiveFilter(label)}
-                  className={`rounded-full px-3 py-1 font-semibold transition-colors ${
+                  className={`${FILTER_PILL_BASE} ${
                     activeFilter === label
-                      ? "bg-sky-500 text-white shadow-lg"
-                      : "bg-white/10 text-gray-300 hover:bg-white/20"
+                      ? `${ACCENT_GRADIENT} text-white shadow-lg border-transparent`
+                      : "bg-white/5 text-gray-300 hover:bg-white/10"
                   }`}
                 >
                   {label} ({
@@ -1847,7 +1878,7 @@ export default function App() {
               )}
             </div>
           </aside>
-          <section className="flex-1 rounded-3xl border border-white/10 bg-white/5 shadow-inner">
+          <section className={`flex-1 ${GLASS_CARD}`}>
             <StrainerDetailView
               strainer={selectedStrainer}
               summary={summary}
