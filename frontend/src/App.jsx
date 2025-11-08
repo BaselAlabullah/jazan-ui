@@ -875,30 +875,8 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
     multipliers.low_load,
     multipliers.shutdown,
   ]);
-  if (!strainer) {
-    return (
-      <div className="flex h-full items-center justify-center p-10 text-2xl text-gray-500">
-        Select a strainer to view its diagnostics
-      </div>
-    );
-  }
-  const statusBadgeColors = {
-    alert: "bg-red-600",
-    warning: "bg-yellow-500",
-    normal: "bg-emerald-500",
-  };
-  const dpTrendLabel =
-    strainer.trends.dpRate > 0.6
-      ? "Up - Accelerating"
-      : strainer.trends.dpRate < 0.2
-      ? "Down - Easing"
-      : "Stable";
-  const efficiencyTrend = strainer.currentMetrics.efficiency < 85 ? "Down - Declining" : "Stable";
-  const currentRiskColor = riskColorFor(strainer.riskAnalysis.impact, strainer.riskAnalysis.probability);
-  const recentEvents = strainer.recentEvents ?? [];
-  const latestLive = liveItems.length ? liveItems[liveItems.length - 1] : null;
   const fleetRiskSummary = useMemo(() => {
-    if (!fleet.length) return null;
+    if (!fleet.length || !strainer) return null;
     const statusCounts = { alert: 0, warning: 0, normal: 0, other: 0 };
     const cellCounts = {};
     const selectedImpact = toTitleLevel(strainer?.riskAnalysis?.impact);
@@ -926,10 +904,12 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
       }
     });
 
-    const [dominantImpact, dominantProbability] = dominantKey ? dominantKey.split("|") : [selectedImpact, selectedProbability];
+    const [dominantImpact, dominantProbability] = dominantKey
+      ? dominantKey.split("|")
+      : [selectedImpact, selectedProbability];
 
     return {
-      total: fleet.length,
+      total: fleet.filter(Boolean).length,
       statusCounts,
       selectedImpact,
       selectedProbability,
@@ -938,7 +918,31 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
       dominantProbability,
       dominantCount: dominantKey ? cellCounts[dominantKey] : sameCellCount,
     };
-  }, [fleet, strainer?.riskAnalysis?.impact, strainer?.riskAnalysis?.probability]);
+  }, [fleet, strainer]);
+
+  if (!strainer) {
+    return (
+      <div className="flex h-full items-center justify-center p-10 text-2xl text-gray-500">
+        Select a strainer to view its diagnostics
+      </div>
+    );
+  }
+  const statusBadgeColors = {
+    alert: "bg-red-600",
+    warning: "bg-yellow-500",
+    normal: "bg-emerald-500",
+  };
+  const dpTrendLabel =
+    strainer.trends.dpRate > 0.6
+      ? "Up - Accelerating"
+      : strainer.trends.dpRate < 0.2
+      ? "Down - Easing"
+      : "Stable";
+  const efficiencyTrend = strainer.currentMetrics.efficiency < 85 ? "Down - Declining" : "Stable";
+  const currentRiskColor = riskColorFor(strainer.riskAnalysis.impact, strainer.riskAnalysis.probability);
+  const recentEvents = strainer.recentEvents ?? [];
+  const latestLive = liveItems.length ? liveItems[liveItems.length - 1] : null;
+  const hasFleetSummary = Boolean(fleetRiskSummary);
   return (
     <div className="h-full overflow-y-auto rounded-3xl bg-transparent p-6">
       <div className="flex items-start justify-between border-b border-white/10 pb-4">
@@ -1001,7 +1005,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
       </div>
       <div className="my-10 space-y-4">
         <RiskMatrix fleet={fleet} selected={strainer} />
-        {fleetRiskSummary && (
+        {hasFleetSummary && (
           <div className={`${GLASS_TILE} p-4`}>
             <div className="text-sm font-semibold text-white">Matrix Overview</div>
             <p className="mt-2 text-xs leading-relaxed text-gray-300">
