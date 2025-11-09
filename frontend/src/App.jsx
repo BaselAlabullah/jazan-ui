@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Activity,
@@ -33,6 +33,16 @@ import {
   Line,
 } from "recharts";
 import { MOCK_KPI_PAYLOAD } from "./mockKpis";
+import KpiCard from "./components/KpiCard";
+import MetricDisplay from "./components/MetricDisplay";
+import {
+  ACCENT_GRADIENT,
+  ACCENT_TEXT,
+  FILTER_PILL_BASE,
+  GLASS_CARD,
+  GLASS_TILE,
+  INPUT_BASE,
+} from "./constants/ui";
 
 const resolveBackendBase = () => {
   const env = import.meta.env || {};
@@ -124,13 +134,6 @@ const LEVEL_LABELS = {
   "very high": "Very High",
 };
 const toTitleLevel = (value) => LEVEL_LABELS[String(value || "medium").toLowerCase()] ?? "Medium";
-const GLASS_CARD = "rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-[0_25px_80px_rgba(2,6,23,0.65)]";
-const GLASS_TILE = "rounded-2xl border border-white/10 bg-white/5 backdrop-blur-lg shadow-[0_15px_45px_rgba(2,6,23,0.55)]";
-const ACCENT_GRADIENT = "bg-gradient-to-br from-indigo-500 via-sky-500 to-emerald-400";
-const ACCENT_TEXT = "bg-gradient-to-r from-sky-300 via-indigo-200 to-emerald-200 bg-clip-text text-transparent";
-const INPUT_BASE =
-  "rounded-2xl border border-white/10 bg-neutral-950/60 text-white placeholder-gray-500 shadow-inner focus:border-sky-400 focus:outline-none focus:ring-0";
-const FILTER_PILL_BASE = "rounded-full border border-white/10 px-3 py-1 text-xs font-semibold transition";
 const regimeColor = (regime) =>
   ({
     normal: "#22c55e",
@@ -185,6 +188,132 @@ const buildRootCauseAnalysis = (explanation, lastPoint, dpPsi, flowRate, efficie
   }
   return lines.join("\n");
 };
+const deriveMetricTrendsForStrainer = (strainer) => {
+  if (!strainer) return {};
+  const safeNumber = (value, fallback = 0) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  };
+  const currentMetrics = strainer.currentMetrics ?? {};
+  const trends = strainer.trends ?? {};
+  const historicalData = Array.isArray(strainer.historicalData) ? strainer.historicalData : [];
+
+  const currentDP = safeNumber(currentMetrics.differentialPressure, safeNumber(trends.baselineDP, 0));
+  const baselineDP = safeNumber(trends.baselineDP, currentDP);
+  const dpDeltaRaw = currentDP - baselineDP;
+  const normalizedDpDelta = Math.abs(dpDeltaRaw) < 0.05 ? 0 : Number(dpDeltaRaw.toFixed(2));
+  const differentialPressure = {
+    delta: normalizedDpDelta,
+    isIncreasePositive: false,
+    label:
+      normalizedDpDelta === 0
+        ? "On baseline"
+        : `${normalizedDpDelta > 0 ? "Up" : "Down"} ${Math.abs(dpDeltaRaw).toFixed(2)} psi vs baseline`,
+    precision: 2,
+    suffix: "psi",
+    noChangeLabel: "On baseline",
+  };
+
+  const previousPoint =
+    historicalData.length > 1 ? historicalData[historicalData.length - 2] : null;
+  const flowRate = (() => {
+    if (!previousPoint) {
+      return null;
+    }
+    const current = safeNumber(currentMetrics.flowRate, 0);
+    const previous = safeNumber(previousPoint.flowRate, current);
+    const diff = current - previous;
+    if (Math.abs(diff) < 0.5) {
+      return {
+        delta: 0,
+        isIncreasePositive: true,
+        label: "Stable",
+        noChangeLabel: "Stable",
+      };
+    }
+    return {
+      delta: diff,
+      isIncreasePositive: true,
+      label: `${diff > 0 ? "Up" : "Down"} ${Math.abs(diff).toFixed(0)} bbl/d`,
+      precision: 0,
+      suffix: "bbl/d",
+      noChangeLabel: "Stable",
+    };
+  })();
+
+  const efficiency = (() => {
+    const current = safeNumber(currentMetrics.efficiency, 0);
+    if (!previousPoint) {
+      return {
+        delta: current < 85 ? -1 : 0,
+        isIncreasePositive: true,
+        label: current < 85 ? "Down - Declining" : "Stable",
+        noChangeLabel: "Stable",
+      };
+    }
+    const previous = safeNumber(previousPoint.efficiency, current);
+    const diff = current - previous;
+    if (Math.abs(diff) < 0.1) {
+      return {
+        delta: 0,
+        isIncreasePositive: true,
+        label: "Stable",
+        noChangeLabel: "Stable",
+      };
+    }
+    return {
+      delta: diff,
+      isIncreasePositive: true,
+      label: diff > 0 ? "Up - Improving" : "Down - Declining",
+      precision: 1,
+      suffix: "%",
+      noChangeLabel: "Stable",
+    };
+  })();
+
+  const daysSinceClean = safeNumber(trends.daysSinceClean, 0);
+  const daysSinceCleanTarget = 21;
+  const daysSinceCleanDelta = daysSinceClean - daysSinceCleanTarget;
+  const normalizedDaysDelta = Math.abs(daysSinceCleanDelta) < 0.5 ? 0 : daysSinceCleanDelta;
+  const daysSinceCleanTrend = {
+    delta: normalizedDaysDelta,
+    isIncreasePositive: false,
+    label:
+      normalizedDaysDelta === 0
+        ? "On schedule"
+        : normalizedDaysDelta > 0
+        ? `${Math.abs(daysSinceCleanDelta).toFixed(0)} days overdue`
+        : `${Math.abs(daysSinceCleanDelta).toFixed(0)} days ahead`,
+    precision: 0,
+    suffix: "days",
+    noChangeLabel: "On schedule",
+  };
+
+  const dpRate = safeNumber(trends.dpRate, 0);
+  const dpRateBaseline = 0.45;
+  const dpRateDelta = dpRate - dpRateBaseline;
+  const normalizedDpRateDelta = Math.abs(dpRateDelta) < 0.02 ? 0 : Number(dpRateDelta.toFixed(2));
+  const dpRateTrend = {
+    delta: normalizedDpRateDelta,
+    isIncreasePositive: false,
+    label:
+      normalizedDpRateDelta === 0
+        ? "On baseline"
+        : `${normalizedDpRateDelta > 0 ? "Up" : "Down"} ${Math.abs(dpRateDelta).toFixed(2)} psi/day vs baseline`,
+    precision: 2,
+    suffix: "psi/day",
+    noChangeLabel: "On baseline",
+  };
+
+  return {
+    differentialPressure,
+    flowRate,
+    efficiency,
+    daysSinceClean: daysSinceCleanTrend,
+    dpRate: dpRateTrend,
+  };
+};
+
 const generateMockStrainerData = (count = 6) => {
   const locations = [
     { unit: "Crude Unit 2a", pump: "Feed Pump P-1051A", position: "Suction" },
@@ -345,7 +474,7 @@ const generateMockStrainerData = (count = 6) => {
         lastOverhaulDate: new Date(new Date(installationDate).getTime() + (2 + Math.random()) * 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
         endOfLifeDate: new Date(new Date(installationDate).getTime() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
     };
-    return {
+    const strainer = {
       id: `STR-${101 + idx}`,
       location: loc,
       status,
@@ -384,6 +513,10 @@ const generateMockStrainerData = (count = 6) => {
       riskAnalysis,
       causalityAnalysis,
       lifecycleInfo,
+    };
+    return {
+      ...strainer,
+      metricTrends: deriveMetricTrendsForStrainer(strainer),
     };
   });
 };
@@ -567,7 +700,7 @@ const createRealStrainer = (kpis, explanation, meta, summary) => {
     acknowledgedBy: null,
     acknowledgedAt: null,
   };
-  return {
+  const strainer = {
     id: "STR-REAL",
     isReal: true,
     location: {
@@ -605,37 +738,11 @@ const createRealStrainer = (kpis, explanation, meta, summary) => {
     probability,
     rawProbability,
   };
+  return {
+    ...strainer,
+    metricTrends: deriveMetricTrendsForStrainer(strainer),
+  };
 };
-const KpiCard = ({ title, value, icon: Icon, color, trend }) => (
-  <div className={`${GLASS_TILE} px-5 py-4`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <div className="text-sm font-semibold uppercase tracking-wide text-gray-400">{title}</div>
-        <div className="mt-2 text-2xl font-bold text-white">{value}</div>
-        {trend && (
-          <div
-            className={`mt-1 text-xs font-medium ${
-              trend.startsWith("+")
-                ? "text-rose-300"
-                : trend.startsWith("-")
-                ? "text-emerald-300"
-                : "text-sky-300"
-            }`}
-          >
-            {trend}
-          </div>
-        )}
-      </div>
-      {Icon ? (
-        <div className={`${ACCENT_GRADIENT} rounded-2xl p-[1px] shadow-lg`}>
-          <div className={`flex h-12 w-12 items-center justify-center rounded-[14px] ${color || "bg-indigo-500/20"} text-white`}>
-            <Icon size={22} />
-          </div>
-        </div>
-      ) : null}
-    </div>
-  </div>
-);
 const StrainerCard = ({ strainer, onSelect, isSelected }) => {
   const statusGlows = {
     alert: "ring-rose-500/50 shadow-[0_0_35px_rgba(244,63,94,0.35)]",
@@ -696,30 +803,6 @@ const StrainerCard = ({ strainer, onSelect, isSelected }) => {
     </div>
   );
 };
-const MetricDisplay = ({ icon, label, value, unit, trend }) => (
-  <div className={`flex items-start ${GLASS_TILE} p-4`}>
-    <div className={`${ACCENT_GRADIENT} mr-3 rounded-2xl p-2.5 text-white shadow-lg`}>{icon}</div>
-    <div className="flex-1">
-      <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">{label}</div>
-      <div className="mt-1 text-xl font-bold text-white">
-        {value} <span className="text-sm font-semibold text-gray-400">{unit}</span>
-      </div>
-      {trend && (
-        <div
-          className={`mt-1 text-xs font-medium ${
-            trend.toLowerCase().startsWith("up")
-              ? "text-rose-300"
-              : trend.toLowerCase().startsWith("down")
-              ? "text-emerald-300"
-              : "text-sky-300"
-          }`}
-        >
-          {trend}
-        </div>
-      )}
-    </div>
-  </div>
-);
 
 const AccordionItem = ({ title, icon: Icon, children, defaultOpen = false }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -875,30 +958,8 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
     multipliers.low_load,
     multipliers.shutdown,
   ]);
-  if (!strainer) {
-    return (
-      <div className="flex h-full items-center justify-center p-10 text-2xl text-gray-500">
-        Select a strainer to view its diagnostics
-      </div>
-    );
-  }
-  const statusBadgeColors = {
-    alert: "bg-red-600",
-    warning: "bg-yellow-500",
-    normal: "bg-emerald-500",
-  };
-  const dpTrendLabel =
-    strainer.trends.dpRate > 0.6
-      ? "Up - Accelerating"
-      : strainer.trends.dpRate < 0.2
-      ? "Down - Easing"
-      : "Stable";
-  const efficiencyTrend = strainer.currentMetrics.efficiency < 85 ? "Down - Declining" : "Stable";
-  const currentRiskColor = riskColorFor(strainer.riskAnalysis.impact, strainer.riskAnalysis.probability);
-  const recentEvents = strainer.recentEvents ?? [];
-  const latestLive = liveItems.length ? liveItems[liveItems.length - 1] : null;
   const fleetRiskSummary = useMemo(() => {
-    if (!fleet.length) return null;
+    if (!fleet.length || !strainer) return null;
     const statusCounts = { alert: 0, warning: 0, normal: 0, other: 0 };
     const cellCounts = {};
     const selectedImpact = toTitleLevel(strainer?.riskAnalysis?.impact);
@@ -926,10 +987,12 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
       }
     });
 
-    const [dominantImpact, dominantProbability] = dominantKey ? dominantKey.split("|") : [selectedImpact, selectedProbability];
+    const [dominantImpact, dominantProbability] = dominantKey
+      ? dominantKey.split("|")
+      : [selectedImpact, selectedProbability];
 
     return {
-      total: fleet.length,
+      total: fleet.filter(Boolean).length,
       statusCounts,
       selectedImpact,
       selectedProbability,
@@ -938,7 +1001,59 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
       dominantProbability,
       dominantCount: dominantKey ? cellCounts[dominantKey] : sameCellCount,
     };
-  }, [fleet, strainer?.riskAnalysis?.impact, strainer?.riskAnalysis?.probability]);
+  }, [fleet, strainer]);
+
+  const metricTrends = useMemo(() => {
+    if (!strainer) return {};
+    if (strainer.metricTrends) return strainer.metricTrends;
+    return deriveMetricTrendsForStrainer(strainer);
+  }, [strainer]);
+
+  if (!strainer) {
+    return (
+      <div className="flex h-full items-center justify-center p-10 text-2xl text-gray-500">
+        Select a strainer to view its diagnostics
+      </div>
+    );
+  }
+
+  const statusBadgeColors = {
+    alert: "bg-red-600",
+    warning: "bg-yellow-500",
+    normal: "bg-emerald-500",
+  };
+  const dpTrendMeta = metricTrends.differentialPressure;
+  const flowTrendMeta = metricTrends.flowRate;
+  const efficiencyTrendMeta = metricTrends.efficiency;
+  const daysSinceCleanTrendMeta = metricTrends.daysSinceClean;
+  const dpRateTrendMeta = metricTrends.dpRate;
+  const currentRiskColor = riskColorFor(strainer.riskAnalysis.impact, strainer.riskAnalysis.probability);
+  const recentEvents = strainer.recentEvents ?? [];
+  const latestLive = liveItems.length ? liveItems[liveItems.length - 1] : null;
+  const hasFleetSummary = Boolean(fleetRiskSummary);
+  const liveProbabilityTrend = (() => {
+    if (!latestLive || latestLive.threshold_eff === undefined || latestLive.threshold_eff === null) {
+      return null;
+    }
+    const delta = Number(latestLive.prob_breach7d) - Number(latestLive.threshold_eff);
+    if (!Number.isFinite(delta)) {
+      return null;
+    }
+    const normalizedDelta = Math.abs(delta) < 0.005 ? 0 : delta;
+    return {
+      delta: normalizedDelta,
+      isIncreasePositive: false,
+      label:
+        normalizedDelta === 0
+          ? "At threshold"
+          : normalizedDelta > 0
+          ? `${Math.abs(delta).toFixed(2)} over threshold`
+          : `${Math.abs(delta).toFixed(2)} under threshold`,
+      precision: 2,
+      suffix: "", 
+      noChangeLabel: "At threshold",
+    };
+  })();
   return (
     <div className="h-full overflow-y-auto rounded-3xl bg-transparent p-6">
       <div className="flex items-start justify-between border-b border-white/10 pb-4">
@@ -960,48 +1075,51 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
       <div className="mt-6">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <MetricDisplay
-            icon={<Gauge size={18} className="text-red-300" />}
-            label="Differential Pressure"
-            value={strainer.currentMetrics.differentialPressure.toFixed(2)}
-            unit="psi"
-            trend={dpTrendLabel}
+              icon={Gauge}
+              label="Differential Pressure"
+              value={strainer.currentMetrics.differentialPressure.toFixed(2)}
+              unit="psi"
+              trend={dpTrendMeta}
             />
             <MetricDisplay
-            icon={<Droplets size={18} className="text-blue-300" />}
-            label="Flow Rate"
-            value={strainer.currentMetrics.flowRate.toFixed(0)}
-            unit="bbl/d"
+              icon={Droplets}
+              label="Flow Rate"
+              value={strainer.currentMetrics.flowRate.toFixed(0)}
+              unit="bbl/d"
+              trend={flowTrendMeta}
             />
             <MetricDisplay
-            icon={<TrendingUp size={18} className="text-emerald-300" />}
-            label="Efficiency"
-            value={strainer.currentMetrics.efficiency.toFixed(1)}
-            unit="%"
-            trend={efficiencyTrend}
+              icon={TrendingUp}
+              label="Efficiency"
+              value={strainer.currentMetrics.efficiency.toFixed(1)}
+              unit="%"
+              trend={efficiencyTrendMeta}
             />
             <MetricDisplay
-            icon={<Clock size={18} className="text-purple-300" />}
-            label="Days Since Clean"
-            value={strainer.trends.daysSinceClean}
-            unit="days"
+              icon={Clock}
+              label="Days Since Clean"
+              value={strainer.trends.daysSinceClean}
+              unit="days"
+              trend={daysSinceCleanTrendMeta}
             />
             <MetricDisplay
-            icon={<Activity size={18} className="text-amber-300" />}
-            label="DP Rate"
-            value={strainer.trends.dpRate}
-            unit="psi/day"
+              icon={Activity}
+              label="DP Rate"
+              value={strainer.trends.dpRate.toFixed(2)}
+              unit="psi/day"
+              trend={dpRateTrendMeta}
             />
             <MetricDisplay
-            icon={<Zap size={18} className="text-yellow-300" />}
-            label="Design Flow"
-            value={strainer.currentMetrics.designFlowRate}
-            unit="bbl/d"
+              icon={Zap}
+              label="Design Flow"
+              value={strainer.currentMetrics.designFlowRate}
+              unit="bbl/d"
             />
         </div>
       </div>
       <div className="my-10 space-y-4">
         <RiskMatrix fleet={fleet} selected={strainer} />
-        {fleetRiskSummary && (
+        {hasFleetSummary && (
           <div className={`${GLASS_TILE} p-4`}>
             <div className="text-sm font-semibold text-white">Matrix Overview</div>
             <p className="mt-2 text-xs leading-relaxed text-gray-300">
@@ -1051,35 +1169,26 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                     <GuidanceCard guidance={liveExplanationState} />
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <MetricDisplay
-                        icon={<AlertTriangle size={18} className="text-red-300" />}
-                        label="Live Probability"
-                        value={latestLive ? Number(latestLive.prob_breach7d).toFixed(2) : "-"}
-                        unit=""
-                        trend={
-                            latestLive && latestLive.threshold_eff
-                            ? latestLive.prob_breach7d >= latestLive.threshold_eff
-                                ? "Up - Above threshold"
-                                : "Down - Below threshold"
-                            : undefined
-                        }
+                          icon={AlertTriangle}
+                          label="Live Probability"
+                          value={latestLive ? Number(latestLive.prob_breach7d).toFixed(2) : "-"}
+                          trend={liveProbabilityTrend}
                         />
                         <MetricDisplay
-                        icon={<Gauge size={18} className="text-emerald-300" />}
-                        label="Threshold (eff.)"
-                        value={latestLive ? Number(latestLive.threshold_eff).toFixed(2) : "-"}
-                        unit=""
+                          icon={Gauge}
+                          label="Threshold (eff.)"
+                          value={latestLive ? Number(latestLive.threshold_eff).toFixed(2) : "-"}
                         />
                         <MetricDisplay
-                        icon={<TrendingUp size={18} className="text-blue-300" />}
-                        label="Risk Band"
-                        value={latestLive ? latestLive.risk_band?.toUpperCase() : "-"}
-                        unit=""
+                          icon={TrendingUp}
+                          label="Risk Band"
+                          value={latestLive ? latestLive.risk_band?.toUpperCase() : "-"}
                         />
                         <MetricDisplay
-                        icon={<Activity size={18} className="text-purple-300" />}
-                        label="Datapoints"
-                        value={liveItems.length}
-                        unit="pts"
+                          icon={Activity}
+                          label="Datapoints"
+                          value={liveItems.length}
+                          unit="pts"
                         />
                     </div>
                     <div className="grid gap-6 lg:grid-cols-[minmax(260px,320px),1fr]">
@@ -1437,13 +1546,33 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
     </div>
   );
 };
-const StrainerOverviewPanels = ({ strainer }) => {
+const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, onSelectStrainer }) => {
+  const [activeTab, setActiveTab] = useState("performance");
+
+  useEffect(() => {
+    setActiveTab("performance");
+  }, [strainer?.id]);
+
   if (!strainer) return null;
-  const hasLive = Boolean(strainer.isReal);
+
   const currentRiskColor = riskColorFor(strainer.riskAnalysis.impact, strainer.riskAnalysis.probability);
-  return (
-    <div className="space-y-4">
-      <AccordionItem title="Performance Trends" icon={TrendIcon} defaultOpen={!hasLive}>
+  const statusGradients = {
+    alert: "from-rose-500 via-orange-500 to-amber-400",
+    warning: "from-amber-400 via-yellow-400 to-emerald-300",
+    normal: "from-emerald-400 via-sky-400 to-indigo-400",
+  };
+  const statusDotColors = {
+    alert: "bg-rose-400",
+    warning: "bg-amber-300",
+    normal: "bg-emerald-300",
+  };
+
+  const overviewTabs = [
+    {
+      key: "performance",
+      title: "Performance Trends",
+      icon: TrendIcon,
+      content: (
         <div className={`${GLASS_TILE} p-5`}>
           <div className="text-lg font-semibold text-white">DP Trend (Last 30 Days)</div>
           <div className="mt-4 h-[320px]">
@@ -1480,15 +1609,30 @@ const StrainerOverviewPanels = ({ strainer }) => {
                     return [value, key];
                   }}
                 />
-                <ReferenceLine y={18} stroke="#fbbf24" strokeDasharray="3 3" label={{ value: "Warning", fill: "#fbbf24", fontSize: 12 }} />
-                <ReferenceLine y={25} stroke="#f87171" strokeDasharray="3 3" label={{ value: "Critical", fill: "#f87171", fontSize: 12 }} />
+                <ReferenceLine
+                  y={18}
+                  stroke="#fbbf24"
+                  strokeDasharray="3 3"
+                  label={{ value: "Warning", fill: "#fbbf24", fontSize: 12 }}
+                />
+                <ReferenceLine
+                  y={25}
+                  stroke="#f87171"
+                  strokeDasharray="3 3"
+                  label={{ value: "Critical", fill: "#f87171", fontSize: 12 }}
+                />
                 <Area type="monotone" dataKey="dp" stroke="#8b5cf6" strokeWidth={2} fill="url(#dpGradientTop)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
-      </AccordionItem>
-      <AccordionItem title="Insights" icon={BrainCircuit}>
+      ),
+    },
+    {
+      key: "insights",
+      title: "Insights",
+      icon: BrainCircuit,
+      content: (
         <div className="space-y-4">
           <AccordionItem title="Root Cause Analysis (RCA)" icon={FileText}>
             <div className="prose prose-invert max-w-none text-sm text-gray-200">
@@ -1585,8 +1729,13 @@ const StrainerOverviewPanels = ({ strainer }) => {
             </div>
           </AccordionItem>
         </div>
-      </AccordionItem>
-      <AccordionItem title="Lifecycle Phase" icon={Calendar}>
+      ),
+    },
+    {
+      key: "lifecycle",
+      title: "Lifecycle Phase",
+      icon: Calendar,
+      content: (
         <div className="space-y-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-lg bg-white/5 p-4">
@@ -1632,7 +1781,66 @@ const StrainerOverviewPanels = ({ strainer }) => {
             </table>
           </div>
         </div>
-      </AccordionItem>
+      ),
+    },
+  ];
+
+  const activeTabConfig = overviewTabs.find((tab) => tab.key === activeTab) ?? overviewTabs[0];
+
+  return (
+    <div className={`${GLASS_CARD} overflow-hidden`}>
+      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 bg-white/5 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {overviewTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = tab.key === activeTabConfig?.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 ${
+                  isActive
+                    ? `${ACCENT_GRADIENT} border border-transparent text-white shadow-lg`
+                    : "border border-white/10 bg-transparent text-gray-300 hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                <Icon size={18} />
+                <span>{tab.title}</span>
+              </button>
+            );
+          })}
+        </div>
+        {strainerOptions.length > 0 && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">Strainers</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {strainerOptions.map((option) => {
+                const isSelected = option.id === selectedId;
+                const gradient = statusGradients[option.status] || "from-slate-600 to-slate-700";
+                const dotColor = statusDotColors[option.status] || "bg-slate-400";
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => onSelectStrainer?.(option.id)}
+                    className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 ${
+                      isSelected
+                        ? `bg-gradient-to-r ${gradient} text-white shadow-lg`
+                        : "border border-white/10 bg-transparent text-gray-300 hover:bg-white/5 hover:text-white"
+                    } ${onSelectStrainer ? "cursor-pointer" : "cursor-default"}`}
+                    disabled={!onSelectStrainer}
+                  >
+                    <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                    <span>{option.id}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="p-5">{activeTabConfig?.content}</div>
     </div>
   );
 };
@@ -1716,11 +1924,6 @@ export default function App() {
   const [activeFilter, setActiveFilter] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedId, setSelectedId] = useState(null);
-  useEffect(() => {
-    if (!selectedId && strainerFleet.length) {
-      setSelectedId(strainerFleet[0].id);
-    }
-  }, [selectedId, strainerFleet]);
   const filteredStrainers = useMemo(() => {
     return strainerFleet.filter((strainer) => {
       const matchesFilter =
@@ -1734,10 +1937,24 @@ export default function App() {
       return matchesFilter && matchesSearch;
     });
   }, [strainerFleet, activeFilter, searchTerm]);
-  const selectedStrainer = useMemo(
-    () => strainerFleet.find((s) => s.id === selectedId) || strainerFleet[0] || null,
-    [selectedId, strainerFleet],
-  );
+  const selectedStrainer = useMemo(() => {
+    if (!selectedId) {
+      return null;
+    }
+    return strainerFleet.find((s) => s.id === selectedId) || null;
+  }, [selectedId, strainerFleet]);
+
+  useEffect(() => {
+    if (filteredStrainers.length === 0) {
+      if (selectedId !== null) {
+        setSelectedId(null);
+      }
+      return;
+    }
+    if (!selectedId || !filteredStrainers.some((strainer) => strainer.id === selectedId)) {
+      setSelectedId(filteredStrainers[0].id);
+    }
+  }, [filteredStrainers, selectedId]);
   const fleetMetrics = useMemo(() => {
     const criticalCount = strainerFleet.filter((s) => s.status === "alert").length;
     const warningCount = strainerFleet.filter((s) => s.status === "warning").length;
@@ -1746,15 +1963,51 @@ export default function App() {
       strainerFleet.reduce((acc, s) => acc + s.currentMetrics.efficiency, 0) /
       Math.max(strainerFleet.length, 1)
     ).toFixed(1);
-    const criticalTrend = realStrainer
-      ? `${criticalCount >= (meta?.alerts_fired ?? 0) ? "+" : "-"}${Math.abs(criticalCount - (meta?.alerts_fired ?? 0))} vs last window`
-      : "No change";
+    const describeCountChange = (delta, basis) => {
+      if (delta === 0) {
+        return `No change ${basis}`;
+      }
+      const direction = delta > 0 ? "more" : "fewer";
+      return `${Math.abs(delta)} ${direction} ${basis}`;
+    };
+    const criticalBaseline = meta?.alerts_fired ?? criticalCount;
+    const criticalDelta = realStrainer ? criticalCount - criticalBaseline : 0;
+    const criticalTrend = {
+      delta: criticalDelta,
+      label: describeCountChange(criticalDelta, "vs last window"),
+      isIncreasePositive: false,
+    };
+    const warningBaseline = Math.max(warningCount - 1, 0);
+    const warningDelta = warningCount - warningBaseline;
+    const warningTrend = {
+      delta: warningDelta,
+      label: describeCountChange(warningDelta, "vs last week"),
+      isIncreasePositive: false,
+    };
+    const maintenanceDelta = 0;
+    const maintenanceTrend = {
+      delta: maintenanceDelta,
+      label: describeCountChange(maintenanceDelta, "vs last week"),
+      isIncreasePositive: false,
+    };
+    const efficiencyDelta = -0.9;
+    const efficiencyTrend = {
+      delta: efficiencyDelta,
+      label:
+        efficiencyDelta === 0
+          ? "No change vs last week"
+          : `${Math.abs(efficiencyDelta).toFixed(1)}% vs last week`,
+      isIncreasePositive: true,
+    };
     return {
       criticalCount,
       warningCount,
       maintenanceDue7d,
       avgEfficiency,
       criticalTrend,
+      warningTrend,
+      maintenanceTrend,
+      efficiencyTrend,
     };
   }, [strainerFleet, meta, realStrainer]);
   return (
@@ -1808,25 +2061,31 @@ export default function App() {
             value={fleetMetrics.warningCount}
             icon={Activity}
             color="bg-amber-500/30"
-            trend="+1 vs last week"
+            trend={fleetMetrics.warningTrend}
           />
           <KpiCard
             title="Maintenance Due [7d]"
             value={fleetMetrics.maintenanceDue7d}
             icon={Wrench}
             color="bg-blue-500/30"
+            trend={fleetMetrics.maintenanceTrend}
           />
           <KpiCard
             title="Avg Fleet Efficiency"
             value={`${fleetMetrics.avgEfficiency}%`}
             icon={TrendingUp}
             color="bg-emerald-500/30"
-            trend="-0.9% vs last week"
+            trend={fleetMetrics.efficiencyTrend}
           />
         </section>
         {selectedStrainer && (
           <section className="space-y-4">
-            <StrainerOverviewPanels strainer={selectedStrainer} />
+            <StrainerOverviewPanels
+              strainer={selectedStrainer}
+              strainerOptions={filteredStrainers}
+              selectedId={selectedId}
+              onSelectStrainer={setSelectedId}
+            />
           </section>
         )}
         <section className="flex min-h-[600px] flex-1 gap-6">
