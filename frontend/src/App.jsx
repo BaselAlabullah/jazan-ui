@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Activity,
@@ -20,9 +20,6 @@ import {
   LineChart as TrendIcon,
   Info,
   ChevronDown,
-  ArrowUp,
-  ArrowDown,
-  Minus,
 } from "lucide-react";
 import {
   Area,
@@ -36,6 +33,13 @@ import {
   Line,
 } from "recharts";
 import { MOCK_KPI_PAYLOAD } from "./mockKpis";
+import {
+  evaluateTrendState,
+  getIconOrientationClass,
+  getTrendAccentClass,
+  getTrendColorClass,
+  selectIconTone,
+} from "./utils/trends";
 
 const resolveBackendBase = () => {
   const env = import.meta.env || {};
@@ -134,16 +138,6 @@ const ACCENT_TEXT = "bg-gradient-to-r from-sky-300 via-indigo-200 to-emerald-200
 const INPUT_BASE =
   "rounded-2xl border border-white/10 bg-neutral-950/60 text-white placeholder-gray-500 shadow-inner focus:border-sky-400 focus:outline-none focus:ring-0";
 const FILTER_PILL_BASE = "rounded-full border border-white/10 px-3 py-1 text-xs font-semibold transition";
-const TREND_COLOR_BY_TONE = {
-  positive: "text-sky-300",
-  negative: "text-rose-300",
-  neutral: "text-indigo-200",
-};
-const TREND_ACCENT_BY_TONE = {
-  positive: "border-sky-400/40 bg-sky-500/15 text-sky-100",
-  negative: "border-rose-400/40 bg-rose-500/15 text-rose-200",
-  neutral: "border-indigo-400/30 bg-indigo-500/10 text-indigo-200",
-};
 const regimeColor = (regime) =>
   ({
     normal: "#22c55e",
@@ -167,85 +161,6 @@ const buildFiveWhys = (explanation) => {
       why: `Why ${idx + 1}?`,
       because: reason,
     }));
-};
-const evaluateTrendState = (trend) => {
-  const hasTrend = Boolean(trend);
-  if (!hasTrend) {
-    return {
-      hasTrend: false,
-      tone: "neutral",
-      glyph: Minus,
-      label: "",
-      delta: 0,
-      hasDelta: false,
-      isZeroDelta: true,
-    };
-  }
-  const explicitTone = trend?.tone;
-  const rawDelta = trend?.delta;
-  const hasDelta = rawDelta !== undefined && rawDelta !== null && Number.isFinite(Number(rawDelta));
-  const delta = hasDelta ? Number(rawDelta) : 0;
-  const isZeroDelta = !hasDelta || delta === 0;
-  const isIncreasePositive = trend?.isIncreasePositive ?? true;
-  let tone = explicitTone ?? "neutral";
-  if (!explicitTone) {
-    if (isZeroDelta) {
-      tone = "neutral";
-    } else {
-      const isPositiveDelta = delta > 0;
-      const isGoodChange = isIncreasePositive ? isPositiveDelta : !isPositiveDelta;
-      tone = isGoodChange ? "positive" : "negative";
-    }
-  }
-  const glyph = (() => {
-    if (!isZeroDelta) {
-      return delta > 0 ? ArrowUp : ArrowDown;
-    }
-    if (explicitTone && explicitTone !== "neutral") {
-      return explicitTone === "positive" ? ArrowUp : ArrowDown;
-    }
-    return Minus;
-  })();
-  const label = (() => {
-    if (typeof trend.label === "string" && trend.label.trim().length) {
-      return trend.label;
-    }
-    if (isZeroDelta) {
-      return trend?.noChangeLabel || "No change";
-    }
-    const absValue = Math.abs(delta);
-    const formattedValue =
-      trend?.precision !== undefined && Number.isFinite(Number(trend.precision))
-        ? absValue.toFixed(trend.precision)
-        : absValue;
-    const suffix = trend?.suffix ? ` ${trend.suffix}` : "";
-    return `${formattedValue}${suffix}`.trim();
-  })();
-  return {
-    hasTrend: true,
-    tone,
-    glyph,
-    label,
-    delta,
-    hasDelta,
-    isZeroDelta,
-  };
-};
-const getTrendColorClass = (tone) => TREND_COLOR_BY_TONE[tone] || TREND_COLOR_BY_TONE.neutral;
-const getTrendAccentClass = (tone) => TREND_ACCENT_BY_TONE[tone] || TREND_ACCENT_BY_TONE.neutral;
-const selectIconTone = (tone, palette) => {
-  if (tone === "positive" && palette.positive) return palette.positive;
-  if (tone === "negative" && palette.negative) return palette.negative;
-  return palette.neutral;
-};
-const getIconOrientationClass = (Icon, tone, hasTrend) => {
-  if (!Icon) return "";
-  if (!hasTrend) return "";
-  if (tone === "neutral") return "";
-  if (Icon === TrendingUp) {
-    return tone === "negative" ? "rotate-180" : "rotate-0";
-  }
-  return "";
 };
 const buildRootCauseAnalysis = (explanation, lastPoint, dpPsi, flowRate, efficiency, daysSinceClean) => {
   const lines = [];
