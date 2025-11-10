@@ -531,37 +531,6 @@ const COMPRESSOR_LOCATIONS = [
   { facility: "Fuel Gas Compression", train: "Train K-120", service: "Fuel Gas" },
   { facility: "Sales Gas Compression", train: "Train K-905", service: "Sales Gas" },
 ];
-const FUEL_CONTAINER_LOCATIONS = [
-  { terminal: "Bulk Terminal North", tank: "TK-201 Floating Roof", position: "Bay 2" },
-  { terminal: "Bulk Terminal North", tank: "TK-203 Floating Roof", position: "Bay 3" },
-  { terminal: "West Logistics Park", tank: "Spherical LPG V-15", position: "Pad 1" },
-  { terminal: "East Tank Farm", tank: "Diesel Bullet T-44", position: "Pod C" },
-  { terminal: "Marine Export Yard", tank: "Gasoline Tank TK-118", position: "Berth Hold" },
-  { terminal: "Aviation Fuel Annex", tank: "Jet A-1 TK-502", position: "Wing Row" },
-];
-const generateMockPetrolContainerData = (count = 6) => {
-  const replacements = [
-    ...buildAssetLanguageReplacements("Fuel Container", "Fuel Containers"),
-    { pattern: /\bmesh\b/gi, replacement: "roof" },
-    { pattern: /\bcleaning\b/gi, replacement: "wash" },
-    { pattern: /\bclean\b/gi, replacement: "wash" },
-  ];
-  const baseFleet = generateMockStrainerData(count);
-  return baseFleet.map((asset, idx) => {
-    const location = FUEL_CONTAINER_LOCATIONS[idx % FUEL_CONTAINER_LOCATIONS.length];
-    const adapted = replaceAssetLanguage(asset, replacements);
-    return {
-      ...adapted,
-      id: `FUEL-${301 + idx}`,
-      assetCategory: "Fuel Storage",
-      location: {
-        unit: location.terminal,
-        pump: location.tank,
-        position: location.position,
-      },
-    };
-  });
-};
 const generateMockCompressorData = (count = 6) => {
   const replacements = [
     ...buildAssetLanguageReplacements("Compressor", "Compressors"),
@@ -600,6 +569,56 @@ const generateMockCompressorData = (count = 6) => {
         daysSinceClean: Math.max(3, Math.round(hoursSinceService / 24)),
         dpRate: Number(((dischargePressure - 400) / Math.max(hoursSinceService, 1)).toFixed(3)),
         baselineDP: Number((dischargePressure - 35).toFixed(1)),
+      },
+    };
+  });
+};
+const PIPELINE_LOCATIONS = [
+  { corridor: "Export Loop A", station: "Block Valve BV-401", section: "North Span" },
+  { corridor: "Export Loop A", station: "Pump Station PS-2", section: "Desert Crossing" },
+  { corridor: "Products Trunk B", station: "Metering Skid MS-7", section: "Coastal Reach" },
+  { corridor: "Gathering Spine C", station: "Launcher Station LS-3", section: "Mountain Pass" },
+  { corridor: "Jet Fuel Spur D", station: "Block Valve BV-812", section: "Terminal Approach" },
+  { corridor: "Arab Light Loop E", station: "Pump Station PS-9", section: "Plateau Span" },
+  { corridor: "Gas Condensate Spur F", station: "Metering Skid MS-11", section: "Marsh Crossing" },
+];
+const generateMockPipelineData = (count = 6) => {
+  const replacements = [
+    ...buildAssetLanguageReplacements("Pipeline Segment", "Pipeline Segments"),
+    { pattern: /\belement\b/gi, replacement: "segment" },
+    { pattern: /\bmesh\b/gi, replacement: "wall thickness" },
+    { pattern: /\bcleaning\b/gi, replacement: "pigging" },
+    { pattern: /\bclean\b/gi, replacement: "pigging" },
+  ];
+  const baseFleet = generateMockStrainerData(count);
+  return baseFleet.map((asset, idx) => {
+    const location = PIPELINE_LOCATIONS[idx % PIPELINE_LOCATIONS.length];
+    const pressureDrop = 38 + Math.random() * 18;
+    const throughput = 240 + Math.random() * 80;
+    const designThroughput = throughput * (1 + Math.random() * 0.2);
+    const integrity = 80 + Math.random() * 15;
+    const daysSincePig = Math.floor(Math.random() * 45) + 5;
+    return {
+      ...replaceAssetLanguage(asset, replacements),
+      id: `PIPE-${420 + idx}`,
+      assetCategory: "Pipeline",
+      location: {
+        unit: location.corridor,
+        pump: location.station,
+        position: location.section,
+      },
+      currentMetrics: {
+        ...asset.currentMetrics,
+        differentialPressure: Number(pressureDrop.toFixed(1)),
+        flowRate: Number(throughput.toFixed(1)),
+        efficiency: Number(integrity.toFixed(1)),
+        designFlowRate: Number(designThroughput.toFixed(1)),
+      },
+      trends: {
+        ...asset.trends,
+        daysSinceClean: daysSincePig,
+        dpRate: Number(((pressureDrop - 30) / Math.max(daysSincePig, 1)).toFixed(3)),
+        baselineDP: Number((pressureDrop - 6).toFixed(1)),
       },
     };
   });
@@ -709,54 +728,60 @@ const ASSET_CONFIGS = {
     },
     generateMockData: generateMockCompressorData,
   },
-  petrol: {
-    key: "petrol",
-    navLabel: "Petrol Containers",
-    label: "Fuel Container",
-    pluralLabel: "Fuel Containers",
-    heroTitle: "Storage Reliability Command",
-    heroTagline: "Floating roof and bullet tank readiness dashboard",
+  pipelines: {
+    key: "pipelines",
+    navLabel: "Pipelines",
+    label: "Pipeline Segment",
+    pluralLabel: "Pipeline Segments",
+    heroTitle: "Pipeline Integrity Command",
+    heroTagline: "Transmission, gathering, and export line health dashboard",
     heroBadge: "Assets",
     icon: Droplets,
-    fleetTitle: "Container Fleet",
-    searchPlaceholder: "Search by tank ID, terminal, segment...",
-    emptyStateTitle: "No Containers Found",
-    emptyStateSubtitle: "Try another tank ID or status.",
-    listChipLabel: "Containers",
-    cardLabels: { dp: "Head Pressure", flow: "Withdrawal", efficiency: "Product Quality", since: "Since wash", sinceSuffix: "d" },
-    cardUnits: { dp: "psi", flow: "bbl/d", efficiency: "%", since: "d" },
+    fleetTitle: "Pipeline Fleet",
+    searchPlaceholder: "Search by corridor, station, ID...",
+    emptyStateTitle: "No Pipelines Found",
+    emptyStateSubtitle: "Adjust corridor or status filters.",
+    listChipLabel: "Pipelines",
+    cardLabels: {
+      dp: "Pressure Drop",
+      flow: "Throughput",
+      efficiency: "Integrity",
+      since: "Since pigging",
+      sinceSuffix: "d",
+    },
+    cardUnits: { dp: "psi", flow: "kbpd", efficiency: "%", since: "d" },
     detailMetricLabels: {
-      dp: "Head Pressure",
-      flow: "Withdrawal Rate",
-      efficiency: "Product Quality",
-      daysSinceClean: "Days Since Wash",
-      dpRate: "Head Rate",
-      designFlow: "Design Withdrawal",
+      dp: "Pressure Drop",
+      flow: "Throughput",
+      efficiency: "Integrity",
+      daysSinceClean: "Days Since Pigging",
+      dpRate: "Drop Rate",
+      designFlow: "Design Capacity",
     },
     detailMetricUnits: {
       dp: "psi",
-      flow: "bbl/d",
+      flow: "kbpd",
       efficiency: "%",
       daysSinceClean: "days",
       dpRate: "psi/day",
-      designFlow: "bbl/d",
+      designFlow: "kbpd",
     },
     chartLabels: {
-      dpTrendTitle: "Head Pressure Trend (30 Days)",
-      dpAxis: "Head (psi)",
-      tooltipDp: "Head",
-      tooltipFlow: "Withdrawal",
-      tooltipEfficiency: "Quality",
+      dpTrendTitle: "Pressure Drop Trend (30 Days)",
+      dpAxis: "Drop (psi)",
+      tooltipDp: "Drop",
+      tooltipFlow: "Flow",
+      tooltipEfficiency: "Integrity",
     },
     maintenanceHistory: {
-      title: "Wash / Inspection History",
-      beforeLabel: "Head Before",
-      afterLabel: "Head After",
-      descriptorLabel: "Residue",
+      title: "Inspection History",
+      beforeLabel: "Pressure Before",
+      afterLabel: "Pressure After",
+      descriptorLabel: "Tool Pass",
       beforeUnit: "psi",
       afterUnit: "psi",
     },
-    generateMockData: generateMockPetrolContainerData,
+    generateMockData: generateMockPipelineData,
   },
 };
 const ASSET_ORDER = Object.keys(ASSET_CONFIGS);
