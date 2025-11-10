@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Activity,
@@ -18,7 +18,6 @@ import {
   ShieldAlert,
   BrainCircuit,
   LineChart as TrendIcon,
-  Info,
   ChevronDown,
   ArrowUpRight,
   ArrowDownRight,
@@ -27,6 +26,8 @@ import {
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -34,6 +35,7 @@ import {
   YAxis,
   ReferenceLine,
   Line,
+  LineChart,
 } from "recharts";
 import { MOCK_KPI_PAYLOAD } from "./mockKpis";
 import KpiCard from "./components/KpiCard";
@@ -55,6 +57,19 @@ const formatDate = (date) => {
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return "-";
   return d.toLocaleDateString();
+};
+const formatTimeRemaining = (days) => {
+  if (!Number.isFinite(days)) return "-";
+  if (days >= 14) {
+    const weeks = Math.max(1, Math.round(days / 7));
+    return `${weeks} week${weeks === 1 ? "" : "s"}`;
+  }
+  if (days >= 1) {
+    const rounded = Math.max(1, Math.round(days));
+    return `${rounded} day${rounded === 1 ? "" : "s"}`;
+  }
+  const hours = Math.max(1, Math.round(days * 24));
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
 };
 const riskColorFor = (impact, probability) => {
   const normalize = (value, fallback) => {
@@ -365,8 +380,10 @@ const generateMockStrainerData = (count = 6) => {
     const historicalData = Array.from({ length: 30 }, (_, i) => {
       const daysAgo = 29 - i;
       const daysSinceCleanAtPoint = Math.max(0, daysSinceClean - (29 - i));
-      const dpAtPoint = baseDP + (daysSinceCleanAtPoint / 30) * dpIncrease * (0.8 + Math.random() * 0.4);
-      const flowAtPoint = designFlowRate - Math.min(dpAtPoint - baseDP, 30) * 2;
+      const baselineDp = baseDP + (daysSinceCleanAtPoint / 30) * dpIncrease;
+      const wiggle = Math.sin(i / 3) * 0.6 + (Math.random() - 0.5) * 0.4;
+      const dpAtPoint = baselineDp * (0.85 + Math.random() * 0.3) + wiggle;
+      const flowAtPoint = designFlowRate - Math.min(Math.max(dpAtPoint - baseDP, 0), 30) * (1.5 + Math.random() * 0.5);
       return {
         date: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
         dp: Number(dpAtPoint.toFixed(2)),
@@ -391,6 +408,26 @@ const generateMockStrainerData = (count = 6) => {
     const daysUntilCritical = dpRate > 0 ? Math.max(1, Math.floor((criticalDP - currentDP) / dpRate)) : 999;
     const projectedPlugDate = new Date(Date.now() + daysUntilCritical * 24 * 60 * 60 * 1000);
     const nextScheduledClean = new Date(Date.now() + (35 - daysSinceClean) * 24 * 60 * 60 * 1000);
+    const debrisCounter = cleaningHistory.reduce((acc, entry) => {
+      acc[entry.debrisType] = (acc[entry.debrisType] || 0) + 1;
+      return acc;
+    }, {});
+    const debrisMix = Object.entries(debrisCounter).map(([type, count]) => ({
+      type,
+      percent: Number(((count / cleaningHistory.length) * 100).toFixed(1)),
+    }));
+    const foulingPrediction = {
+      daysToCritical: daysUntilCritical,
+      foulingRate: Number(dpRate.toFixed(2)),
+      projectedPlugDate: projectedPlugDate.toISOString().split("T")[0],
+      timelineLabel: `Breach in ${formatTimeRemaining(daysUntilCritical)}`,
+      recommendation:
+        daysUntilCritical < 5
+          ? "Schedule emergency clean"
+          : daysUntilCritical < 12
+          ? "Advance cleaning window"
+          : "Continue monitoring",
+    };
     let rootCauseAnalysis = "";
     if (status === "alert") {
       if (currentDP > 25) {
@@ -515,6 +552,8 @@ const generateMockStrainerData = (count = 6) => {
       riskAnalysis,
       causalityAnalysis,
       lifecycleInfo,
+      predictions: foulingPrediction,
+      debrisMix,
     };
     return {
       ...strainer,
@@ -543,11 +582,74 @@ const generateMockCompressorData = (count = 6) => {
   return baseFleet.map((asset, idx) => {
     const location = COMPRESSOR_LOCATIONS[idx % COMPRESSOR_LOCATIONS.length];
     const adapted = replaceAssetLanguage(asset, replacements);
+    const compressorStatus = adapted.status ?? "normal";
     const dischargePressure = 420 + Math.random() * 90;
     const throughput = 60 + Math.random() * 35;
     const designThroughput = throughput * (1 + Math.random() * 0.25);
     const efficiency = 70 + Math.random() * 20;
     const hoursSinceService = Math.floor(Math.random() * 480) + 72;
+    const vibrationTrend = Array.from({ length: 30 }, (_, i) => {
+      const daysAgo = 29 - i;
+      const vibration = 2 + Math.random() * (compressorStatus === "alert" ? 4 : compressorStatus === "warning" ? 3 : 1.5);
+      return {
+        date: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        dischargePsi: Number((dischargePressure + Math.sin(i / 5) * 8).toFixed(1)),
+        vibrationIps: Number(vibration.toFixed(2)),
+      };
+    });
+    const bearingHealth = ["Thrust", "Journal", "Balance Piston"].map((name) => ({
+      name: `${name} Bearing`,
+      status: randomChoice(["Normal", "Watch", "Alert"]),
+      trend: Number((Math.random() * 1.5 - 0.5).toFixed(2)),
+    }));
+    const serviceTimeline = Array.from({ length: 3 }, (_, i) => {
+      const daysAgo = (i + 1) * 120;
+      return {
+        date: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        scope: randomChoice(["Bundle pull", "Seal replacement", "Rotor balance"]),
+        downtime: `${(18 + Math.random() * 12).toFixed(1)} hrs`,
+        riskIfSkipped: randomChoice(["Medium", "High"]),
+      };
+    });
+    const predictions = {
+      tripProbability72h: Number((0.05 + Math.random() * 0.25).toFixed(2)),
+      energyPenalty: Number(((100 - efficiency) * 0.15).toFixed(1)),
+      serviceDueDays: Math.max(2, 30 - Math.round(hoursSinceService / 12)),
+    };
+    const performanceEnvelope = {
+      mtbsDays: Math.floor(18 + Math.random() * 20),
+      surgeMargin: Number((5 + Math.random() * 6).toFixed(1)),
+      loadLine: Number((72 + Math.random() * 18).toFixed(1)),
+      throughputUtilization: Number(((throughput / designThroughput) * 100).toFixed(0)),
+      vibrationSeverityIndex: Number((1.5 + Math.random() * (compressorStatus === "alert" ? 2.5 : 1.5)).toFixed(1)),
+      efficiencyDrift: Number((Math.max(0, 88 - efficiency) * 0.25).toFixed(1)),
+    };
+    const bearingSparklines = bearingHealth.map((item) => ({
+      name: item.name,
+      samples: Array.from({ length: 12 }, () => Number((1 + Math.random() * (compressorStatus === "alert" ? 1.5 : 1)).toFixed(2))),
+    }));
+    const lubeOilTemps = ["Thrust Loop", "Balance Loop", "Seal Oil"].map((loop) => ({
+      loop,
+      value: Number((130 + Math.random() * 18).toFixed(1)),
+      limit: 150,
+    }));
+    const orbitSnapshots = ["NDE", "DE", "Thrust"].map((stage) => ({
+      stage,
+      major: Number((6 + Math.random() * 2.5).toFixed(1)),
+      minor: Number((3 + Math.random() * 1.5).toFixed(1)),
+      orientation: randomChoice(["Horizontal", "Vertical"]),
+    }));
+    const conditionMonitoring = {
+      bearingSparklines,
+      lubeOilTemps,
+      startReliability: Number((0.88 + Math.random() * 0.09).toFixed(2)),
+      orbitSnapshots,
+      vibrationBand: {
+        safe: 2.2,
+        warning: 3.5,
+        current: vibrationTrend[vibrationTrend.length - 1]?.vibrationIps ?? 0,
+      },
+    };
     return {
       ...adapted,
       id: `COMP-${610 + idx}`,
@@ -570,6 +672,13 @@ const generateMockCompressorData = (count = 6) => {
         dpRate: Number(((dischargePressure - 400) / Math.max(hoursSinceService, 1)).toFixed(3)),
         baselineDP: Number((dischargePressure - 35).toFixed(1)),
       },
+      vibrationTrend,
+      bearingHealth,
+      serviceTimeline,
+      predictions,
+      performanceEnvelope,
+      conditionMonitoring,
+      maintenanceLog: serviceTimeline,
     };
   });
 };
@@ -598,6 +707,63 @@ const generateMockPipelineData = (count = 6) => {
     const designThroughput = throughput * (1 + Math.random() * 0.2);
     const integrity = 80 + Math.random() * 15;
     const daysSincePig = Math.floor(Math.random() * 45) + 5;
+    const segmentProfiles = Array.from({ length: 5 }, (_, segIdx) => ({
+      segment: `KP ${segIdx * 12}-${segIdx * 12 + 12}`,
+      gradient: Number((pressureDrop / 5 + (Math.random() - 0.5) * 3).toFixed(1)),
+      status: randomChoice(["Normal", "Watch", "Alert"]),
+      pressureDrop: Number((pressureDrop * (0.8 + Math.random() * 0.4)).toFixed(1)),
+    }));
+    const corrosionForecast = Array.from({ length: 5 }, (_, yearIdx) => ({
+      year: new Date().getFullYear() + yearIdx,
+      depth: Number((0.08 + Math.random() * 0.12 + yearIdx * 0.03).toFixed(2)),
+    }));
+    const pigSchedule = Array.from({ length: 3 }, (_, i) => ({
+      run: `PIG-${idx}-${i + 1}`,
+      date: new Date(Date.now() + (i + 1) * 15 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+      type: randomChoice(["Cleaning", "MFL ILI", "Caliper"]),
+      readiness: randomChoice(["Ready", "Needs Prep"]),
+    }));
+    const leakTimelineDays = Math.max(2, 45 - daysSincePig + Math.random() * 5);
+    const leakRisk = {
+      probability: Number((0.01 + Math.random() * 0.08).toFixed(2)),
+      detectionConfidence: randomChoice(["High", "Medium"]),
+      timelineDays: leakTimelineDays,
+      recommendation:
+        integrity < 85 ? "Increase patrol frequency" : daysSincePig > 30 ? "Advance pig run" : "Normal monitoring",
+    };
+    const stationLabels = ["Inlet", "PS-1", "BV-2", "PS-3", "Terminal"];
+    const pressureProfile = stationLabels.map((station, stationIdx) => ({
+      station,
+      pressure: Number((pressureDrop + 60 - stationIdx * (pressureDrop / stationLabels.length) + (Math.random() - 0.5) * 4).toFixed(1)),
+      temperature: Number((42 + Math.random() * 8).toFixed(1)),
+    }));
+    const flowAssurance = {
+      hydrateRisk: randomChoice(["Low", "Medium", "High"]),
+      waxRisk: randomChoice(["Low", "Medium", "High"]),
+      linePackUtilization: Number((65 + Math.random() * 25).toFixed(0)),
+      pigTimeline: pigSchedule,
+    };
+    const iliFindings = segmentProfiles.map((segment) => ({
+      segment: segment.segment,
+      anomaly: randomChoice(["Metal loss", "Dent", "Ovality"]),
+      severity: randomChoice(["Low", "Medium", "High"]),
+    }));
+    const integrityHighlights = {
+      corrosionAllowanceLeft: Number((0.18 + Math.random() * 0.22).toFixed(2)),
+      burstPressureMargin: Number((6 + Math.random() * 10).toFixed(1)),
+      inlineInspection: iliFindings,
+      corrosionGrowth: corrosionForecast,
+    };
+    const valveStatus = ["Launcher", "Mid-line", "Receiver"].map((name) => ({
+      name: `${name} Valve`,
+      status: randomChoice(["Open", "Closed", "Maintenance"]),
+    }));
+    const operationsSnapshot = {
+      valveStatus,
+      pumpAvailability: Number((0.84 + Math.random() * 0.1).toFixed(2)),
+      leakDetectionScore: Number((0.7 + Math.random() * 0.2).toFixed(2)),
+      maopRisk: Number((0.01 + Math.random() * 0.06).toFixed(2)),
+    };
     return {
       ...replaceAssetLanguage(asset, replacements),
       id: `PIPE-${420 + idx}`,
@@ -620,8 +786,200 @@ const generateMockPipelineData = (count = 6) => {
         dpRate: Number(((pressureDrop - 30) / Math.max(daysSincePig, 1)).toFixed(3)),
         baselineDP: Number((pressureDrop - 6).toFixed(1)),
       },
+      segmentProfiles,
+      corrosionForecast,
+      pigSchedule,
+      pressureProfile,
+      flowAssurance,
+      integrityHighlights,
+      operationsSnapshot,
+      leakRisk,
+      predictions: {
+        pigDueDays: Math.max(3, 35 - daysSincePig),
+        leakTimelineDays,
+        leakDetectionScore: operationsSnapshot.leakDetectionScore,
+        maopRisk: operationsSnapshot.maopRisk,
+      },
     };
   });
+};
+const createRealStrainer = (kpis = [], explanation, meta) => {
+  if (!Array.isArray(kpis) || kpis.length === 0) {
+    return null;
+  }
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const sortedPoints = [...kpis]
+    .map((point) => {
+      const tsDate = new Date(point.ts || Date.now());
+      return {
+        ...point,
+        tsDate,
+        dpPsi: psiFromMbar(point.dp_excess_mbar ?? 400),
+      };
+    })
+    .sort((a, b) => a.tsDate - b.tsDate);
+  const latest = sortedPoints[sortedPoints.length - 1];
+  const reference = sortedPoints[Math.max(0, sortedPoints.length - 3)];
+  const windowDays = Math.max(1, Math.round((latest.tsDate - reference.tsDate) / DAY_MS));
+  const dpRateRaw = (latest.dpPsi - reference.dpPsi) / windowDays;
+  const smoothedDpRate = Number(dpRateRaw.toFixed(3));
+  const positiveDpRate = smoothedDpRate > 0.01 ? smoothedDpRate : 0.12;
+  const designFlowRate = 980;
+  const flowRate = clamp(designFlowRate - latest.dpPsi * 13, designFlowRate * 0.4, designFlowRate * 0.98);
+  const efficiency = clamp((flowRate / designFlowRate) * 100, 30, 99);
+  const lastCleanDate = meta?.last_clean_date ? new Date(meta.last_clean_date) : null;
+  const daysSinceClean = lastCleanDate
+    ? Math.max(1, Math.round((Date.now() - lastCleanDate.getTime()) / DAY_MS))
+    : 14;
+  const nextCleanDueDate = lastCleanDate
+    ? new Date(lastCleanDate.getTime() + 35 * DAY_MS)
+    : new Date(Date.now() + 14 * DAY_MS);
+  const criticalDp = 30;
+  const daysUntilCritical = Math.max(1, Math.round((criticalDp - latest.dpPsi) / positiveDpRate));
+  const projectedPlugDate = new Date(Date.now() + daysUntilCritical * DAY_MS);
+  const probabilityLevel = probabilityLevelFromValue(latest.prob_breach7d ?? latest.prob_breach7d_raw ?? 0.52);
+  const impactLevel = impactLevelFromSignal(latest.risk_band ?? "medium", latest.dpPsi);
+  const status = latest.risk_band === "high" ? "alert" : latest.risk_band === "medium" ? "warning" : "normal";
+  const severity = status === "alert" ? "critical" : status === "warning" ? "warning" : "info";
+  const isoDate = (date) => {
+    const d = new Date(date);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString().split("T")[0] : d.toISOString().split("T")[0];
+  };
+  const historicalData = sortedPoints.map((point) => {
+    const flowAtPoint = clamp(designFlowRate - point.dpPsi * 12, designFlowRate * 0.4, designFlowRate);
+    const efficiencyAtPoint = clamp((flowAtPoint / designFlowRate) * 100, 30, 99);
+    return {
+      date: isoDate(point.tsDate),
+      dp: Number(point.dpPsi.toFixed(2)),
+      flowRate: Number(flowAtPoint.toFixed(0)),
+      efficiency: Number(efficiencyAtPoint.toFixed(1)),
+    };
+  });
+  while (historicalData.length < 30) {
+    const first = historicalData[0];
+    const seedDate = first ? new Date(first.date) : new Date();
+    seedDate.setDate(seedDate.getDate() - 1);
+    const priorDp = clamp((first?.dp ?? latest.dpPsi) - 0.25, 10, 28);
+    const flowAtPoint = clamp(designFlowRate - priorDp * 12, designFlowRate * 0.4, designFlowRate);
+    const efficiencyAtPoint = clamp((flowAtPoint / designFlowRate) * 100, 30, 99);
+    historicalData.unshift({
+      date: isoDate(seedDate),
+      dp: Number(priorDp.toFixed(2)),
+      flowRate: Number(flowAtPoint.toFixed(0)),
+      efficiency: Number(efficiencyAtPoint.toFixed(1)),
+    });
+  }
+  const cleaningHistory = Array.from({ length: 3 }).map((_, idx) => {
+    const daysAgo = daysSinceClean + idx * 32;
+    return {
+      date: isoDate(new Date(Date.now() - daysAgo * DAY_MS)),
+      dpBefore: Number(Math.max(latest.dpPsi - idx * 0.6, 16).toFixed(1)),
+      dpAfter: Number(Math.max(latest.dpPsi - 6 - idx * 0.3, 7).toFixed(1)),
+      downtime: (2.6 + idx * 0.4).toFixed(1),
+      debrisType: ["Sand/Silt", "Corrosion Products", "Scale"][idx % 3],
+    };
+  });
+  const debrisMix = Object.entries(
+    cleaningHistory.reduce((acc, event) => {
+      acc[event.debrisType] = (acc[event.debrisType] || 0) + 1;
+      return acc;
+    }, {}),
+  ).map(([type, count]) => ({
+    type,
+    percent: Number(((count / cleaningHistory.length) * 100).toFixed(1)),
+  }));
+  const predictions = {
+    daysToCritical: daysUntilCritical,
+    foulingRate: Number(positiveDpRate.toFixed(2)),
+    projectedPlugDate: isoDate(projectedPlugDate),
+    timelineLabel: `Breach in ${formatTimeRemaining(daysUntilCritical)}`,
+    recommendation:
+      daysUntilCritical < 5
+        ? "Schedule emergency clean"
+        : daysUntilCritical < 12
+        ? "Advance cleaning window"
+        : "Continue monitoring",
+  };
+  const rootCauseAnalysis = buildRootCauseAnalysis(
+    explanation,
+    latest,
+    latest.dpPsi,
+    flowRate,
+    efficiency,
+    daysSinceClean,
+  );
+  const causalityAnalysis = {
+    problemStatement: `Live strainer ${latest.id || "STR-REAL"} DP trending ${status}`,
+    fiveWhys: buildFiveWhys(explanation),
+  };
+  const lifecycleInfo = {
+    installationDate: isoDate(new Date(Date.now() - 3 * 365 * DAY_MS)),
+    lastOverhaulDate: isoDate(new Date(Date.now() - 14 * 30 * DAY_MS)),
+    endOfLifeDate: isoDate(new Date(Date.now() + 7 * 365 * DAY_MS)),
+  };
+  const supplierInfo = {
+    elementSupplier: "FilterCorp Live",
+    meshSize: 150,
+    material: "316 SS",
+    lastInspectionDate: isoDate(lastCleanDate || new Date(Date.now() - 45 * DAY_MS)),
+    meanTimeToFailure: "9.0 months",
+  };
+  const riskAnalysis = {
+    probability: probabilityLevel,
+    impact: impactLevel,
+    riskScore: riskScoreFromLevels(probabilityLevel, impactLevel),
+    mitigationActions: explanation?.actions ?? [],
+  };
+  const strainer = {
+    id: latest.id || "STR-REAL",
+    location: {
+      unit: "Crude Unit 2A • Live Feed",
+      pump: "Feed Pump P-1051A",
+      position: "Suction",
+    },
+    status,
+    severity,
+    isReal: true,
+    currentMetrics: {
+      differentialPressure: Number(latest.dpPsi.toFixed(2)),
+      flowRate: Number(flowRate.toFixed(0)),
+      efficiency: Number(efficiency.toFixed(1)),
+      designFlowRate,
+    },
+    trends: {
+      daysSinceClean,
+      nextCleanDue: isoDate(nextCleanDueDate),
+      projectedPlugDate: isoDate(projectedPlugDate),
+      daysUntilCritical,
+      dpRate: smoothedDpRate,
+      baselineDP: Number(Math.max(sortedPoints[0]?.dpPsi ?? latest.dpPsi - 2, 10).toFixed(2)),
+    },
+    historicalData,
+    cleaningHistory,
+    alertDetails: {
+      severity,
+      message:
+        status === "alert"
+          ? "Live feed indicates DP above safe band"
+          : status === "warning"
+          ? "DP rising faster than baseline"
+          : "Operating normally",
+      acknowledged: false,
+      acknowledgedBy: null,
+      acknowledgedAt: null,
+    },
+    rootCauseAnalysis,
+    supplierInfo,
+    riskAnalysis,
+    causalityAnalysis,
+    lifecycleInfo,
+    predictions,
+    debrisMix,
+  };
+  return {
+    ...strainer,
+    metricTrends: deriveMetricTrendsForStrainer(strainer),
+  };
 };
 const ASSET_CONFIGS = {
   strainers: {
@@ -872,142 +1230,6 @@ const RiskMatrix = ({ fleet = [], selected, assetLabel = "Asset", assetLabelPlur
     </div>
   );
 };
-const createRealStrainer = (kpis, explanation, meta, summary) => {
-  if (!kpis?.length) return null;
-  const last = kpis[kpis.length - 1];
-  const regime = last?.regime ?? "normal";
-  const riskBand = last?.risk_band ?? "medium";
-  const statusMap = { high: "alert", medium: "warning", low: "normal" };
-  const status = statusMap[riskBand] ?? "normal";
-  const severity = status === "alert" ? "critical" : status === "warning" ? "warning" : "info";
-  const dpPsi = psiFromMbar(last?.dp_excess_mbar ?? 0);
-  const designFlow = 900;
-  const probability = Number(last?.prob_breach7d ?? 0.4);
-  const rawProbability = Number(last?.prob_breach7d_raw ?? probability);
-  const flowRate = clamp(designFlow * (1 - probability / 1.5), 450, designFlow);
-  const efficiency = clamp(100 - probability * 55, 62, 98);
-  const historicalData = kpis.slice(-30).map((row) => ({
-    date: new Date(row.ts).toISOString().split("T")[0],
-    dp: psiFromMbar(row.dp_excess_mbar ?? last.dp_excess_mbar ?? 0),
-    flowRate: clamp(designFlow * (1 - (row.prob_breach7d ?? probability) / 1.5), 450, designFlow),
-    efficiency: clamp(100 - (row.prob_breach7d ?? probability) * 55, 62, 98),
-  }));
-  const baselineDP = historicalData.reduce((acc, entry) => acc + entry.dp, 0) / (historicalData.length || 1);
-  const daysSinceClean = Math.max(3, Math.round((meta?.alerts_fired ?? 0) * 4 + 6));
-  const dpRate = historicalData.length > 1
-    ? ((historicalData[historicalData.length - 1].dp - historicalData[0].dp) /
-        Math.max(daysSinceClean, 1))
-    : 0.32;
-  const boundedDpRate = Number(clamp(dpRate, 0.18, 0.9).toFixed(3));
-  const daysUntilCritical = Math.max(1, Math.round((30 - dpPsi) / Math.max(boundedDpRate, 0.2)));
-  const projectedPlugDate = new Date(Date.now() + daysUntilCritical * 24 * 60 * 60 * 1000);
-  const nextCleanDue = new Date(Date.now() + Math.max(1, 32 - daysSinceClean) * 24 * 60 * 60 * 1000);
-    const rootCauseAnalysis = buildRootCauseAnalysis(
-      explanation,
-      last,
-      dpPsi,
-      flowRate,
-    efficiency,
-    daysSinceClean,
-  );
-  const cleaningHistory = Array.from({ length: 3 }, (_, idx) => {
-    const spread = 25 + idx * 6 + Math.random() * 3;
-    const date = new Date(Date.now() - spread * 24 * 60 * 60 * 1000);
-    return {
-      date: date.toISOString().split("T")[0],
-      dpBefore: Number((baselineDP + idx * 2.4 + 4).toFixed(2)),
-      dpAfter: Number((baselineDP - 2 + idx).toFixed(2)),
-      downtime: (2 + Math.random() * 3).toFixed(1),
-      debrisType: randomChoice(["Sand/Silt", "Corrosion Products", "Scale", "Polymer Residue"]),
-    };
-  }).reverse();
-  const actions = explanation?.actions?.length
-    ? explanation.actions
-    : [
-        "Maintain current monitoring cadence; escalate if persistence triggers.",
-        "Verify differential-pressure instrumentation health.",
-        "Cross-check upstream separation efficiency.",
-      ];
-  const probabilityLevel = probabilityLevelFromValue(probability);
-  const impactLevel = impactLevelFromSignal(riskBand, dpPsi);
-    const riskAnalysis = {
-      probability: probabilityLevel,
-      impact: impactLevel,
-      riskScore: riskScoreFromLevels(probabilityLevel, impactLevel),
-    mitigationActions: actions,
-  };
-  const causalityAnalysis = {
-    problemStatement: `Elevated DP (${dpPsi.toFixed(2)} psi) on strainer STR-REAL`,
-    fiveWhys: buildFiveWhys(explanation),
-  };
-  const supplierInfo = {
-    elementSupplier: "FlowGuard Inc.",
-    meshSize: 150,
-    material: "316 SS",
-    lastInspectionDate: new Date(Date.now() - 310 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    meanTimeToFailure: "9.5 months",
-  };
-   const installationDate = new Date(Date.now() - (3 + Math.random() * 5) * 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-    const lifecycleInfo = {
-        installationDate,
-        lastOverhaulDate: new Date(new Date(installationDate).getTime() + (2 + Math.random()) * 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        endOfLifeDate: new Date(new Date(installationDate).getTime() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    };
-  const alertDetails = {
-    severity,
-    message:
-      status === "alert"
-        ? "Critical: DP trend breaching regime threshold"
-        : status === "warning"
-        ? "Warning: DP trend rising faster than baseline"
-        : "Operating within expected thresholds",
-    acknowledged: false,
-    acknowledgedBy: null,
-    acknowledgedAt: null,
-  };
-  const strainer = {
-    id: "STR-REAL",
-    isReal: true,
-    location: {
-      unit: "Jazan Refinery POC",
-      pump: regime === "low_load" ? "Recycle Gas Compressor K-5201" : "Feed Pump P-1051A",
-      position: regime === "shutdown" ? "Offline" : "Suction",
-    },
-    status,
-    severity,
-    riskBand,
-    rootCauseAnalysis,
-    currentMetrics: {
-      differentialPressure: Number(dpPsi.toFixed(2)),
-      flowRate: Number(flowRate.toFixed(0)),
-      efficiency: Number(efficiency.toFixed(1)),
-      designFlowRate: designFlow,
-    },
-    trends: {
-      daysSinceClean,
-      nextCleanDue: nextCleanDue.toISOString().split("T")[0],
-      projectedPlugDate: projectedPlugDate.toISOString().split("T")[0],
-      daysUntilCritical,
-      dpRate: boundedDpRate,
-      baselineDP: Number(baselineDP.toFixed(2)),
-    },
-    historicalData,
-    cleaningHistory,
-    alertDetails,
-    supplierInfo,
-    riskAnalysis,
-    causalityAnalysis,
-    lifecycleInfo,
-    guidance: explanation,
-    recentEvents: kpis.slice(-40),
-    probability,
-    rawProbability,
-  };
-  return {
-    ...strainer,
-    metricTrends: deriveMetricTrendsForStrainer(strainer),
-  };
-};
 const StrainerCard = ({ strainer, onSelect, isSelected, assetConfig }) => {
   const statusGlows = {
     alert: "ring-rose-500/50 shadow-[0_0_35px_rgba(244,63,94,0.35)]",
@@ -1082,7 +1304,8 @@ const StrainerCard = ({ strainer, onSelect, isSelected, assetConfig }) => {
   );
 };
 
-const AccordionItem = ({ title, icon: Icon, children, defaultOpen = false }) => {
+const AccordionItem = ({ title, icon, children, defaultOpen = false }) => {
+  const IconComponent = icon;
   const [isOpen, setIsOpen] = useState(defaultOpen);
   return (
     <div className={`overflow-hidden ${GLASS_CARD}`}>
@@ -1092,7 +1315,7 @@ const AccordionItem = ({ title, icon: Icon, children, defaultOpen = false }) => 
       >
         <div className="flex items-center gap-3">
           <div className={`${ACCENT_GRADIENT} flex h-10 w-10 items-center justify-center rounded-2xl text-white`}>
-            <Icon size={20} />
+            {IconComponent && <IconComponent size={20} />}
           </div>
           <span>{title}</span>
         </div>
@@ -1114,91 +1337,618 @@ const AccordionItem = ({ title, icon: Icon, children, defaultOpen = false }) => 
   );
 };
 
-const GuidanceCard = ({ guidance }) => {
-  if (!guidance) return null;
+const PredictionCard = ({ title, value, description }) => (
+  <div className={`${GLASS_TILE} flex flex-col gap-2 p-4`}>
+    <div className="text-xs uppercase tracking-wide text-gray-400">{title}</div>
+    <div className="text-2xl font-semibold text-white">{value}</div>
+    {description && <div className="text-xs text-gray-400">{description}</div>}
+  </div>
+);
+const InlineSparkline = ({ samples = [], stroke = "#38bdf8" }) => {
+  if (!samples.length) {
+    return <div className="h-10 w-full rounded-full bg-white/5" />;
+  }
+  const max = Math.max(...samples);
+  const min = Math.min(...samples);
+  const points = samples
+    .map((sample, idx) => {
+      const x = (idx / Math.max(samples.length - 1, 1)) * 100;
+      const normalized = max - min === 0 ? 0.5 : (sample - min) / (max - min);
+      const y = 100 - normalized * 100;
+      return `${x},${y}`;
+    })
+    .join(" ");
   return (
-    <div className={`${GLASS_CARD} bg-gradient-to-br from-indigo-500/10 via-slate-900/40 to-emerald-500/10 p-6`}>
-      <div className="flex items-start gap-3">
-        <div className={`${ACCENT_GRADIENT} rounded-2xl p-2.5 text-white shadow-lg`}>
-          <Info size={18} />
-        </div>
-        <div className="flex-1">
-          <div className="text-sm font-semibold uppercase tracking-wide text-indigo-100">
-            Operator Guidance
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-10 w-full">
+      <polyline fill="none" stroke={stroke} strokeWidth="3" strokeLinecap="round" points={points} />
+    </svg>
+  );
+};
+const CompressorPerformanceChart = ({ data = [] }) => {
+  if (!data.length) {
+    return (
+      <div className={`${GLASS_TILE} p-5`}>
+        <div className="text-lg font-semibold text-white">Discharge Pressure vs Vibration</div>
+        <div className="mt-4 text-sm text-gray-400">No vibration telemetry available.</div>
+      </div>
+    );
+  }
+  return (
+    <div className={`${GLASS_TILE} p-5`}>
+      <div className="text-lg font-semibold text-white">Discharge Pressure vs Vibration</div>
+      <div className="mt-4 h-[320px] min-h-[320px]">
+        <ResponsiveContainer>
+          <LineChart data={data}>
+            <CartesianGrid stroke="rgba(255,255,255,0.05)" />
+            <XAxis
+              dataKey="date"
+              stroke="#9ca3af"
+              fontSize={12}
+              tickFormatter={(value) => {
+                const d = new Date(value);
+                return `${d.getMonth() + 1}/${d.getDate()}`;
+              }}
+            />
+            <YAxis yAxisId="left" stroke="#67e8f9" domain={["auto", "auto"]} />
+            <YAxis yAxisId="right" orientation="right" stroke="#f87171" domain={["auto", "auto"]} />
+            <Tooltip
+              contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px" }}
+              labelStyle={{ color: "#e5e7eb" }}
+            />
+            <Line yAxisId="left" type="monotone" dataKey="dischargePsi" stroke="#67e8f9" strokeWidth={2} dot={false} />
+            <Line yAxisId="right" type="monotone" dataKey="vibrationIps" stroke="#f87171" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+const PipelineCorrosionChart = ({ data = [] }) => {
+  if (!data.length) {
+    return (
+      <div className={`${GLASS_TILE} p-5`}>
+        <div className="text-lg font-semibold text-white">Corrosion Depth Forecast</div>
+        <div className="mt-4 text-sm text-gray-400">No corrosion forecast available.</div>
+      </div>
+    );
+  }
+  return (
+    <div className={`${GLASS_TILE} p-5`}>
+      <div className="text-lg font-semibold text-white">Corrosion Depth Forecast</div>
+      <div className="mt-4 h-[260px] min-h-[260px]">
+        <ResponsiveContainer>
+          <AreaChart data={data}>
+            <defs>
+              <linearGradient id="corrosionGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#f97316" stopOpacity={0.8} />
+                <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="rgba(255,255,255,0.05)" />
+            <XAxis dataKey="year" stroke="#9ca3af" fontSize={12} />
+            <YAxis stroke="#9ca3af" fontSize={12} unit=" mm/y" />
+            <Tooltip
+              contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px" }}
+              labelStyle={{ color: "#e5e7eb" }}
+            />
+            <Area type="monotone" dataKey="depth" stroke="#fb923c" strokeWidth={2} fill="url(#corrosionGradient)" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+const CompressorDetailSections = ({ compressor }) => {
+  if (!compressor) return null;
+  const predictions = compressor.predictions ?? {};
+  const serviceTimeline = formatTimeRemaining(predictions.serviceDueDays ?? 0);
+  return (
+    <div className="mt-6 space-y-4">
+      <CompressorPerformanceChart data={compressor.vibrationTrend ?? []} />
+      <div className="grid gap-4 md:grid-cols-3">
+        <PredictionCard
+          title="Trip Probability [72h]"
+          value={`${Math.round((predictions.tripProbability72h ?? 0) * 100)}%`}
+          description={`Breach window ~${formatTimeRemaining(3)} (72h)`}
+        />
+        <PredictionCard
+          title="Energy Penalty"
+          value={`${predictions.energyPenalty ?? 0} kWh`}
+          description="Excess energy from efficiency loss"
+        />
+        <PredictionCard
+          title="Service Due"
+          value={`${predictions.serviceDueDays ?? 0} days`}
+          description={`Recommended service in ${serviceTimeline}`}
+        />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className={`${GLASS_TILE} p-4`}>
+          <div className="text-sm font-semibold text-white">Bearing Health</div>
+          <div className="mt-3 space-y-3 text-sm">
+            {(compressor.bearingHealth ?? []).map((item, idx) => (
+              <div key={`bearing-${idx}`} className="flex items-center justify-between rounded-2xl border border-white/10 px-3 py-2">
+                <div>
+                  <div className="font-semibold text-white">{item.name}</div>
+                  <div className="text-xs text-gray-400">Trend: {item.trend > 0 ? "+" : ""}{item.trend} ips</div>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    item.status === "Alert"
+                      ? "bg-rose-500/30 text-rose-200"
+                      : item.status === "Watch"
+                      ? "bg-amber-500/30 text-amber-100"
+                      : "bg-emerald-500/20 text-emerald-200"
+                  }`}
+                >
+                  {item.status}
+                </span>
+              </div>
+            ))}
           </div>
-          <div className="mt-3 grid gap-6 md:grid-cols-2">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-100">
-                Why the model flagged risk
+        </div>
+        <div className={`${GLASS_TILE} p-4`}>
+          <div className="text-sm font-semibold text-white">Service Timeline</div>
+          <div className="mt-3 space-y-3 text-sm text-gray-300">
+            {(compressor.serviceTimeline ?? []).map((event, idx) => (
+              <div key={`service-${idx}`} className="rounded-2xl border border-white/10 p-3">
+                <div className="text-xs uppercase tracking-wide text-gray-400">{event.date}</div>
+                <div className="font-semibold text-white">{event.scope}</div>
+                <div className="text-xs text-gray-400">Downtime: {event.downtime}</div>
+                <div className="text-xs text-gray-400">Risk if skipped: {event.riskIfSkipped}</div>
               </div>
-              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-indigo-50">
-                {(guidance.reasons ?? ["DP trend is rising versus regime-adjusted threshold."]).map((reason, idx) => (
-                  <li key={`reason-${idx}`}>{reason}</li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-100">
-                Suggested actions
-              </div>
-              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-indigo-50">
-                {(guidance.actions ?? ["Continue monitoring and follow refinery checklist if persistence increases."]).map(
-                  (action, idx) => (
-                    <li key={`action-${idx}`}>{action}</li>
-                  ),
-                )}
-              </ul>
-            </div>
+            ))}
           </div>
         </div>
       </div>
     </div>
   );
 };
-const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, liveMeta, fleet = [], assetConfig }) => {
-  const hasLive = Boolean(strainer?.isReal);
-  const REGIMES = ["normal", "post_startup", "low_load", "shutdown"];
-  const defaultMultipliers = summary?.regime_threshold_multipliers ?? {
-    normal: 1.4,
-    post_startup: 1.6,
-    low_load: 1.7,
-    shutdown: 1.8,
-  };
-  const [baseThreshold, setBaseThreshold] = useState(summary?.base_threshold ?? 0.25);
-  const [persistK, setPersistK] = useState(summary?.persistence_k ?? 5);
-  const [cooldownHours, setCooldownHours] = useState(summary?.cooldown_hours ?? 48);
-  const [multipliers, setMultipliers] = useState(defaultMultipliers);
-  const [liveItems, setLiveItems] = useState(strainer?.recentEvents ?? liveKpis ?? []);
-  const [liveExplanationState, setLiveExplanationState] = useState(strainer?.guidance ?? liveExplanation ?? null);
-  const [liveMetaState, setLiveMetaState] = useState(liveMeta ?? null);
-  const [livePending, setLivePending] = useState(false);
-  const [liveError, setLiveError] = useState(null);
+const PipelineDetailSections = ({ pipeline }) => {
+  if (!pipeline) return null;
+  return (
+    <div className="mt-6 space-y-4">
+      <div className={`${GLASS_TILE} p-4`}>
+        <div className="text-sm font-semibold text-white">Segment Gradients</div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {(pipeline.segmentProfiles ?? []).map((segment, idx) => (
+            <div key={`segment-${idx}`} className="rounded-2xl border border-white/10 p-3">
+              <div className="flex items-center justify-between text-sm text-gray-300">
+                <span>{segment.segment}</span>
+                <span className="text-white">{segment.gradient} psi/km</span>
+              </div>
+              <div className="mt-3 h-1.5 rounded-full bg-white/10">
+                <div
+                  className={`h-full rounded-full ${
+                    segment.status === "Alert"
+                      ? "bg-rose-500"
+                      : segment.status === "Watch"
+                      ? "bg-amber-400"
+                      : "bg-emerald-400"
+                  }`}
+                  style={{ width: `${Math.min(100, (segment.gradient / 50) * 100)}%` }}
+                />
+              </div>
+              <div className="mt-2 text-xs uppercase tracking-wide text-gray-400">{segment.status}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
+        <PipelineCorrosionChart data={pipeline.corrosionForecast ?? []} />
+        <div className="space-y-4">
+          <div className={`${GLASS_TILE} p-4`}>
+            <div className="text-sm font-semibold text-white">Leak Risk Outlook</div>
+            <div className="mt-3 grid gap-3 text-sm">
+              <PredictionCard
+                title="Probability"
+                value={`${Math.round((pipeline.leakRisk?.probability ?? 0) * 100)}%`}
+                description={`Detection confidence: ${pipeline.leakRisk?.detectionConfidence ?? "High"} · ${formatTimeRemaining(pipeline.leakRisk?.timelineDays ?? 0)} window`}
+              />
+              <div className={`${GLASS_TILE} p-3 text-xs text-gray-300`}>
+                {pipeline.leakRisk?.recommendation ?? "Continue routine patrols"}
+              </div>
+            </div>
+          </div>
+          <div className={`${GLASS_TILE} p-4`}>
+            <div className="text-sm font-semibold text-white">Upcoming Pig Runs</div>
+            <div className="mt-3 space-y-3 text-sm text-gray-300">
+              {(pipeline.pigSchedule ?? []).map((run, idx) => (
+                <div key={`pig-${idx}`} className="rounded-2xl border border-white/10 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-white">{run.run}</span>
+                    <span className="text-xs uppercase tracking-wide text-gray-400">{run.date}</span>
+                  </div>
+                  <div className="text-xs text-gray-400">{run.type}</div>
+                  <div className="text-xs text-gray-400">Status: {run.readiness}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <PredictionCard
+            title="Next Pig Due"
+            value={formatTimeRemaining(pipeline.predictions?.pigDueDays ?? 0)}
+            description="Recommended cleaning window"
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+const CompressorOverviewPanels = ({ compressor }) => {
+  const [activeTab, setActiveTab] = useState("performance");
+  useEffect(() => {
+    setActiveTab("performance");
+  }, [compressor?.id]);
 
+  if (!compressor) return null;
+
+  const latestVibration = compressor.vibrationTrend?.slice(-1)[0];
+  const envelope = compressor.performanceEnvelope ?? {};
+  const conditionMonitoring = compressor.conditionMonitoring ?? {};
+  const maintenanceLog = compressor.maintenanceLog ?? compressor.serviceTimeline ?? [];
+  const overviewTabs = [
+    {
+      key: "performance",
+      title: "Performance & Reliability",
+      icon: TrendingUp,
+      content: (
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <PredictionCard
+              title="MTBS Forecast"
+              value={`${envelope.mtbsDays ?? "-"} days`}
+              description="Mean time between services"
+            />
+            <PredictionCard
+              title="Surge Margin"
+              value={`${envelope.surgeMargin ?? "-"} psi`}
+              description="Distance to surge line"
+            />
+            <PredictionCard
+              title="Throughput vs Design"
+              value={`${envelope.throughputUtilization ?? "-"}%`}
+              description="Current load vs design map"
+            />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-[1.4fr,0.6fr]">
+            <CompressorPerformanceChart data={compressor.vibrationTrend ?? []} />
+            <div className={`${GLASS_TILE} p-4`}>
+              <div className="text-sm font-semibold text-white">Reliability Notes</div>
+              <div className="mt-4 space-y-2 text-sm text-gray-300">
+                <div className="flex items-center justify-between">
+                  <span>Vibration Severity</span>
+                  <span className="text-white">{envelope.vibrationSeverityIndex ?? "-"} ips</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Load Line Position</span>
+                  <span className="text-white">{envelope.loadLine ?? "-"}%</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Efficiency Drift</span>
+                  <span className="text-white">{envelope.efficiencyDrift ?? "-"}%</span>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-gray-400">
+                  Latest discharge {latestVibration?.dischargePsi ?? "-"} psi | RMS vibration {latestVibration?.vibrationIps ?? "-"} ips
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "condition",
+      title: "Condition Monitoring",
+      icon: Activity,
+      content: (
+        <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
+          <div className={`${GLASS_TILE} p-4`}>
+            <div className="text-sm font-semibold text-white">Bearing Sparklines</div>
+            <div className="mt-4 grid gap-3 text-xs text-gray-300">
+              {(conditionMonitoring.bearingSparklines ?? []).map((bearing, idx) => (
+                <div key={`bearing-spark-${idx}`} className="rounded-2xl border border-white/10 p-3">
+                  <div className="flex items-center justify-between text-white">
+                    <span>{bearing.name}</span>
+                    <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                      {compressor.bearingHealth?.[idx]?.status ?? "Watch"}
+                    </span>
+                  </div>
+                  <div className="mt-2">
+                    <InlineSparkline samples={bearing.samples} stroke="#f472b6" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div className={`${GLASS_TILE} p-4`}>
+              <div className="text-sm font-semibold text-white">Lube Oil Temperatures</div>
+              <div className="mt-3 space-y-3 text-xs text-gray-300">
+                {(conditionMonitoring.lubeOilTemps ?? []).map((loop, idx) => (
+                  <div key={`lube-${idx}`}>
+                    <div className="flex items-center justify-between">
+                      <span>{loop.loop}</span>
+                      <span className="text-white">{loop.value} degF</span>
+                    </div>
+                    <div className="mt-2 h-1.5 rounded-full bg-white/10">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-400 to-rose-400"
+                        style={{ width: `${Math.min(100, (loop.value / loop.limit) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 text-[11px] uppercase tracking-wide text-gray-500">Limit {loop.limit} degF</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <PredictionCard
+              title="Start Reliability"
+              value={`${Math.round((conditionMonitoring.startReliability ?? 0) * 100)}%`}
+              description="Prediction for next 3 attempts"
+            />
+            <div className={`${GLASS_TILE} p-4`}>
+              <div className="text-sm font-semibold text-white">Orbit Snapshots</div>
+              <div className="mt-3 grid gap-3 text-xs text-gray-300">
+                {(conditionMonitoring.orbitSnapshots ?? []).map((orbit, idx) => (
+                  <div
+                    key={`orbit-${idx}`}
+                    className="flex items-center justify-between rounded-2xl border border-white/10 px-3 py-2"
+                  >
+                    <div>
+                      <div className="font-semibold text-white">{orbit.stage}</div>
+                      <div className="text-[11px] uppercase tracking-wide text-gray-500">{orbit.orientation}</div>
+                    </div>
+                    <div className="text-right text-white">
+                      {orbit.major}" / {orbit.minor}"
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "maintenance",
+      title: "Maintenance Log",
+      icon: Wrench,
+      content: (
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <PredictionCard
+              title="Trip Probability [72h]"
+              value={`${Math.round((compressor.predictions?.tripProbability72h ?? 0) * 100)}%`}
+              description="Model fusion score"
+            />
+            <PredictionCard
+              title="Energy Penalty"
+              value={`${compressor.predictions?.energyPenalty ?? 0} kWh`}
+              description="Efficiency drift cost"
+            />
+            <PredictionCard
+              title="Service Window"
+              value={`${compressor.predictions?.serviceDueDays ?? 0} days`}
+              description="Recommended service lead time"
+            />
+          </div>
+          <div className={`${GLASS_TILE} p-4`}>
+            <div className="text-sm font-semibold text-white">Service Timeline</div>
+            <div className="mt-3 space-y-3 text-sm text-gray-300">
+              {maintenanceLog.map((event, idx) => (
+                <div key={`svc-${idx}`} className="rounded-2xl border border-white/10 p-3">
+                  <div className="text-xs uppercase tracking-wide text-gray-400">{event.date}</div>
+                  <div className="font-semibold text-white">{event.scope}</div>
+                  <div className="text-xs text-gray-400">Downtime: {event.downtime}</div>
+                  <div className="text-xs text-gray-400">Risk if skipped: {event.riskIfSkipped}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+  ];
+  const activeTabConfig = overviewTabs.find((tab) => tab.key === activeTab) ?? overviewTabs[0];
+  return (
+    <div className={`${GLASS_CARD} overflow-hidden`}>
+      <div className="flex flex-wrap gap-2 border-b border-white/10 bg-white/5 px-5 py-4">
+        {overviewTabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = tab.key === activeTabConfig.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 ${
+                isActive
+                  ? `${ACCENT_GRADIENT} border border-transparent text-white shadow-lg`
+                  : "border border-white/10 bg-transparent text-gray-300 hover:bg-white/5 hover:text-white"
+              }`}
+            >
+              <Icon size={18} />
+              <span>{tab.title}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="p-5">{activeTabConfig.content}</div>
+    </div>
+  );
+};
+const PipelineOverviewPanels = ({ pipeline }) => {
+  const [activeTab, setActiveTab] = useState("flow");
   useEffect(() => {
-    if (!hasLive) return;
-    const defaults = summary?.regime_threshold_multipliers ?? defaultMultipliers;
-    setBaseThreshold(summary?.base_threshold ?? 0.25);
-    setPersistK(summary?.persistence_k ?? 5);
-    setCooldownHours(summary?.cooldown_hours ?? 48);
-    setMultipliers(defaults);
-    setLiveItems(strainer?.recentEvents ?? liveKpis ?? []);
-    setLiveExplanationState(strainer?.guidance ?? liveExplanation ?? null);
-    setLiveMetaState(liveMeta ?? null);
-  }, [hasLive, strainer?.id, summary, liveKpis, liveExplanation, liveMeta]);
-  useEffect(() => {
-    if (!hasLive) return;
-    setLivePending(false);
-    setLiveError(null);
-  }, [
-    hasLive,
-    baseThreshold,
-    persistK,
-    cooldownHours,
-    multipliers.normal,
-    multipliers.post_startup,
-    multipliers.low_load,
-    multipliers.shutdown,
-  ]);
+    setActiveTab("flow");
+  }, [pipeline?.id]);
+
+  if (!pipeline) return null;
+
+  const flowAssurance = pipeline.flowAssurance ?? {};
+  const integrityHighlights = pipeline.integrityHighlights ?? {};
+  const operationsSnapshot = pipeline.operationsSnapshot ?? {};
+  const overviewTabs = [
+    {
+      key: "flow",
+      title: "Flow Assurance",
+      icon: Droplets,
+      content: (
+        <div className="grid gap-4 lg:grid-cols-[1.5fr,0.5fr]">
+          <div className={`${GLASS_TILE} p-4`}>
+            <div className="text-sm font-semibold text-white">Pressure vs Station</div>
+            <div className="mt-4 h-[260px]">
+              <ResponsiveContainer>
+                <LineChart data={pipeline.pressureProfile ?? []}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="station" stroke="#9ca3af" fontSize={12} />
+                  <YAxis stroke="#9ca3af" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px" }}
+                    labelStyle={{ color: "#e5e7eb" }}
+                  />
+                  <Line type="monotone" dataKey="pressure" stroke="#60a5fa" strokeWidth={3} dot />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="space-y-4">
+            <PredictionCard title="Hydrate Risk" value={flowAssurance.hydrateRisk ?? "Unknown"} description="Modeled 7d outlook" />
+            <PredictionCard title="Wax Trend" value={flowAssurance.waxRisk ?? "Unknown"} description="Deposition likelihood" />
+            <PredictionCard
+              title="Line-Pack Utilization"
+              value={`${flowAssurance.linePackUtilization ?? "-"}%`}
+              description="Current packing factor"
+            />
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "integrity",
+      title: "Integrity",
+      icon: ShieldAlert,
+      content: (
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
+            <PipelineCorrosionChart data={integrityHighlights.corrosionGrowth ?? pipeline.corrosionForecast ?? []} />
+            <div className={`${GLASS_TILE} p-4`}>
+              <div className="text-sm font-semibold text-white">ILI Findings</div>
+              <div className="mt-3 space-y-3 text-xs text-gray-300">
+                {(integrityHighlights.inlineInspection ?? []).map((finding, idx) => (
+                  <div key={`ili-${idx}`} className="rounded-2xl border border-white/10 p-3">
+                    <div className="text-xs uppercase tracking-wide text-gray-400">{finding.segment}</div>
+                    <div className="font-semibold text-white">{finding.anomaly}</div>
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500">{finding.severity} severity</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <PredictionCard
+              title="Corrosion Allowance"
+              value={`${integrityHighlights.corrosionAllowanceLeft ?? "-"} in`}
+              description="Remaining wall"
+            />
+            <PredictionCard
+              title="Burst Margin"
+              value={`${integrityHighlights.burstPressureMargin ?? "-"}%`}
+              description="Vs MAOP"
+            />
+            <PredictionCard
+              title="Leak Detection Score"
+              value={`${Math.round((pipeline.predictions?.leakDetectionScore ?? 0) * 100)}%`}
+              description="Model confidence"
+            />
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "operations",
+      title: "Operations",
+      icon: Building,
+      content: (
+        <div className="grid gap-4 lg:grid-cols-[1fr,1fr]">
+          <div className={`${GLASS_TILE} p-4`}>
+            <div className="text-sm font-semibold text-white">Valve Status</div>
+            <div className="mt-3 space-y-3 text-xs text-gray-300">
+              {(operationsSnapshot.valveStatus ?? []).map((valve, idx) => (
+                <div key={`valve-${idx}`} className="flex items-center justify-between rounded-2xl border border-white/10 px-3 py-2">
+                  <span>{valve.name}</span>
+                  <span
+                    className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+                      valve.status === "Maintenance"
+                        ? "bg-amber-500/20 text-amber-200"
+                        : valve.status === "Closed"
+                        ? "bg-rose-500/20 text-rose-200"
+                        : "bg-emerald-500/20 text-emerald-200"
+                    }`}
+                  >
+                    {valve.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-4">
+            <PredictionCard
+              title="Pump Availability"
+              value={`${Math.round((operationsSnapshot.pumpAvailability ?? 0) * 100)}%`}
+              description="Stations available"
+            />
+            <PredictionCard
+              title="MAOP Breach Risk"
+              value={`${Math.round((pipeline.predictions?.maopRisk ?? 0) * 100)}%`}
+              description="Next 7d probability"
+            />
+            <PredictionCard
+              title="Next Pig Run"
+              value={flowAssurance.pigTimeline?.[0]?.date ?? "-"}
+              description={flowAssurance.pigTimeline?.[0]?.type ?? "Scheduled"}
+            />
+          </div>
+        </div>
+      ),
+    },
+  ];
+  const activeTabConfig = overviewTabs.find((tab) => tab.key === activeTab) ?? overviewTabs[0];
+  return (
+    <div className={`${GLASS_CARD} overflow-hidden`}>
+      <div className="flex flex-wrap gap-2 border-b border-white/10 bg-white/5 px-5 py-4">
+        {overviewTabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = tab.key === activeTabConfig.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 ${
+                isActive
+                  ? `${ACCENT_GRADIENT} border border-transparent text-white shadow-lg`
+                  : "border border-white/10 bg-transparent text-gray-300 hover:bg-white/5 hover:text-white"
+              }`}
+            >
+              <Icon size={18} />
+              <span>{tab.title}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="p-5">{activeTabConfig.content}</div>
+    </div>
+  );
+};
+const StrainerDetailView = ({ strainer, fleet = [], assetConfig }) => {
+  const metricTrends = useMemo(() => {
+    if (!strainer) return {};
+    if (strainer.metricTrends) return strainer.metricTrends;
+    return deriveMetricTrendsForStrainer(strainer);
+  }, [strainer]);
+
   const fleetRiskSummary = useMemo(() => {
     if (!fleet.length || !strainer) return null;
     const statusCounts = { alert: 0, warning: 0, normal: 0, other: 0 };
@@ -1244,12 +1994,6 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
     };
   }, [fleet, strainer]);
 
-  const metricTrends = useMemo(() => {
-    if (!strainer) return {};
-    if (strainer.metricTrends) return strainer.metricTrends;
-    return deriveMetricTrendsForStrainer(strainer);
-  }, [strainer]);
-
   const assetLabelLower = assetConfig?.label ? assetConfig.label.toLowerCase() : "asset";
   if (!strainer) {
     return (
@@ -1269,99 +2013,101 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
   const efficiencyTrendMeta = metricTrends.efficiency;
   const daysSinceCleanTrendMeta = metricTrends.daysSinceClean;
   const dpRateTrendMeta = metricTrends.dpRate;
-  const currentRiskColor = riskColorFor(strainer.riskAnalysis.impact, strainer.riskAnalysis.probability);
-  const recentEvents = strainer.recentEvents ?? [];
-  const latestLive = liveItems.length ? liveItems[liveItems.length - 1] : null;
-  const hasFleetSummary = Boolean(fleetRiskSummary);
-  const liveProbabilityTrend = (() => {
-    if (!latestLive || latestLive.threshold_eff === undefined || latestLive.threshold_eff === null) {
-      return null;
-    }
-    const delta = Number(latestLive.prob_breach7d) - Number(latestLive.threshold_eff);
-    if (!Number.isFinite(delta)) {
-      return null;
-    }
-    const normalizedDelta = Math.abs(delta) < 0.005 ? 0 : delta;
-    return {
-      delta: normalizedDelta,
-      isIncreasePositive: false,
-      label:
-        normalizedDelta === 0
-          ? "At threshold"
-          : normalizedDelta > 0
-          ? `${Math.abs(delta).toFixed(2)} over threshold`
-          : `${Math.abs(delta).toFixed(2)} under threshold`,
-      precision: 2,
-      suffix: "", 
-      noChangeLabel: "At threshold",
-    };
-  })();
   const detailMetricLabels = assetConfig?.detailMetricLabels ?? {};
   const detailMetricUnits = assetConfig?.detailMetricUnits ?? {};
-  const maintenanceHistoryLabels = assetConfig?.maintenanceHistory ?? {};
+  const hasFleetSummary = Boolean(fleetRiskSummary);
+  const isCompressor = assetConfig?.key === "compressors";
+  const isPipeline = assetConfig?.key === "pipelines";
+
   return (
     <div className="h-full overflow-y-auto rounded-3xl bg-transparent p-6">
       <div className="flex items-start justify-between border-b border-white/10 pb-4">
         <div>
           <div className="text-3xl font-extrabold text-white">{strainer.id}</div>
           <div className="mt-2 text-sm text-gray-400">
-            {`${strainer.location.unit} \u00B7 ${strainer.location.pump} (${strainer.location.position})`}
+            {`${strainer.location.unit} · ${strainer.location.pump}`}
           </div>
         </div>
         <span
-          className={`rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white ${
-            statusBadgeColors[strainer.status] || statusBadgeColors.normal
+          className={`rounded-full px-4 py-1.5 text-sm font-semibold uppercase tracking-wide text-white ${
+            statusBadgeColors[strainer.status] || "bg-slate-600"
           }`}
         >
-          {strainer.status === "alert" ? "Alert" : strainer.status === "warning" ? "Warning" : "Normal"}
         </span>
       </div>
 
       <div className="mt-6">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <MetricDisplay
-              icon={Gauge}
-              label={detailMetricLabels.dp ?? "Differential Pressure"}
-              value={strainer.currentMetrics.differentialPressure.toFixed(2)}
-              unit={detailMetricUnits.dp ?? "psi"}
-              trend={dpTrendMeta}
-            />
-            <MetricDisplay
-              icon={Droplets}
-              label={detailMetricLabels.flow ?? "Flow Rate"}
-              value={strainer.currentMetrics.flowRate.toFixed(0)}
-              unit={detailMetricUnits.flow ?? "bbl/d"}
-              trend={flowTrendMeta}
-            />
-            <MetricDisplay
-              icon={TrendingUp}
-              label={detailMetricLabels.efficiency ?? "Efficiency"}
-              value={strainer.currentMetrics.efficiency.toFixed(1)}
-              unit={detailMetricUnits.efficiency ?? "%"}
-              trend={efficiencyTrendMeta}
-            />
-            <MetricDisplay
-              icon={Clock}
-              label={detailMetricLabels.daysSinceClean ?? "Days Since Clean"}
-              value={strainer.trends.daysSinceClean}
-              unit={detailMetricUnits.daysSinceClean ?? "days"}
-              trend={daysSinceCleanTrendMeta}
-            />
-            <MetricDisplay
-              icon={Activity}
-              label={detailMetricLabels.dpRate ?? "DP Rate"}
-              value={strainer.trends.dpRate.toFixed(2)}
-              unit={detailMetricUnits.dpRate ?? "psi/day"}
-              trend={dpRateTrendMeta}
-            />
-            <MetricDisplay
-              icon={Zap}
-              label={detailMetricLabels.designFlow ?? "Design Flow"}
-              value={strainer.currentMetrics.designFlowRate}
-              unit={detailMetricUnits.designFlow ?? "bbl/d"}
-            />
+          <MetricDisplay
+            icon={Gauge}
+            label={detailMetricLabels.dp ?? "Differential Pressure"}
+            value={strainer.currentMetrics.differentialPressure.toFixed(2)}
+            unit={detailMetricUnits.dp ?? "psi"}
+            trend={dpTrendMeta}
+          />
+          <MetricDisplay
+            icon={Droplets}
+            label={detailMetricLabels.flow ?? "Flow Rate"}
+            value={strainer.currentMetrics.flowRate.toFixed(0)}
+            unit={detailMetricUnits.flow ?? "bbl/d"}
+            trend={flowTrendMeta}
+          />
+          <MetricDisplay
+            icon={TrendingUp}
+            label={detailMetricLabels.efficiency ?? "Efficiency"}
+            value={strainer.currentMetrics.efficiency.toFixed(1)}
+            unit={detailMetricUnits.efficiency ?? "%"}
+            trend={efficiencyTrendMeta}
+          />
+          <MetricDisplay
+            icon={Clock}
+            label={detailMetricLabels.daysSinceClean ?? "Days Since Clean"}
+            value={strainer.trends.daysSinceClean}
+            unit={detailMetricUnits.daysSinceClean ?? "days"}
+            trend={daysSinceCleanTrendMeta}
+          />
+          <MetricDisplay
+            icon={Activity}
+            label={detailMetricLabels.dpRate ?? "DP Rate"}
+            value={strainer.trends.dpRate.toFixed(2)}
+            unit={detailMetricUnits.dpRate ?? "psi/day"}
+            trend={dpRateTrendMeta}
+          />
+          <MetricDisplay
+            icon={Zap}
+            label={detailMetricLabels.designFlow ?? "Design Flow"}
+            value={strainer.currentMetrics.designFlowRate}
+            unit={detailMetricUnits.designFlow ?? "bbl/d"}
+          />
         </div>
       </div>
+
+      {isCompressor ? (
+        <CompressorDetailSections compressor={strainer} />
+      ) : isPipeline ? (
+        <PipelineDetailSections pipeline={strainer} />
+      ) : (
+        strainer.predictions && (
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <PredictionCard
+              title="Breach Timeline"
+              value={strainer.predictions.timelineLabel ?? "-"}
+              description={`Projected plug date ${strainer.predictions.projectedPlugDate ?? "-"}`}
+            />
+            <PredictionCard
+              title="Fouling Rate"
+              value={`${strainer.predictions.foulingRate ?? 0} psi/day`}
+              description={strainer.predictions.recommendation}
+            />
+            <PredictionCard
+              title="Cleaning Window"
+              value={formatTimeRemaining(strainer.predictions.daysToCritical ?? 0)}
+              description={`Next scheduled clean ${formatDate(strainer.trends?.nextCleanDue)}`}
+            />
+          </div>
+        )
+      )}
+
       <div className="my-10 space-y-4">
         <RiskMatrix
           fleet={fleet}
@@ -1373,16 +2119,17 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
           <div className={`${GLASS_TILE} p-4`}>
             <div className="text-sm font-semibold text-white">Matrix Overview</div>
             <p className="mt-2 text-xs leading-relaxed text-gray-300">
-              {strainer.id} sits in the{" "}
+              {strainer.id} sits in the {" "}
               <span className="text-sky-300">
                 {fleetRiskSummary.selectedImpact} impact / {fleetRiskSummary.selectedProbability} probability
               </span>{" "}
               cell alongside {fleetRiskSummary.sameCellCount}{" "}
-              {fleetRiskSummary.sameCellCount === 1 ? "peer" : "peers"} across the fleet. The densest cluster is{" "}
+              {fleetRiskSummary.sameCellCount === 1 ? "peer" : "peers"} across the fleet. The densest cluster is {" "}
               <span className="text-emerald-300">
                 {fleetRiskSummary.dominantImpact} impact / {fleetRiskSummary.dominantProbability} probability
               </span>{" "}
-              with {fleetRiskSummary.dominantCount} {fleetRiskSummary.dominantCount === 1 ? "asset" : "assets"}.
+              with {fleetRiskSummary.dominantCount}{" "}
+              {fleetRiskSummary.dominantCount === 1 ? "asset" : "assets"}.
             </p>
             <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide">
               <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-red-300 backdrop-blur">
@@ -1411,395 +2158,10 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
           </div>
         )}
       </div>
-
-      <div className="mt-6 space-y-4">
-        {hasLive && (
-             <AccordionItem title="Live KPI Tuning & Simulation" icon={CheckCircle} defaultOpen>
-                <div className="space-y-6">
-                    <GuidanceCard guidance={liveExplanationState} />
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <MetricDisplay
-                          icon={AlertTriangle}
-                          label="Live Probability"
-                          value={latestLive ? Number(latestLive.prob_breach7d).toFixed(2) : "-"}
-                          trend={liveProbabilityTrend}
-                        />
-                        <MetricDisplay
-                          icon={Gauge}
-                          label="Threshold (eff.)"
-                          value={latestLive ? Number(latestLive.threshold_eff).toFixed(2) : "-"}
-                        />
-                        <MetricDisplay
-                          icon={TrendingUp}
-                          label="Risk Band"
-                          value={latestLive ? latestLive.risk_band?.toUpperCase() : "-"}
-                        />
-                        <MetricDisplay
-                          icon={Activity}
-                          label="Datapoints"
-                          value={liveItems.length}
-                          unit="pts"
-                        />
-                    </div>
-                    <div className="grid gap-6 lg:grid-cols-[minmax(260px,320px),1fr]">
-                        <div className={`${GLASS_TILE} p-4`}>
-                        <div className="text-sm font-semibold text-white">Alert Tuning</div>
-                        <div className="mt-4 space-y-4 text-sm text-gray-200">
-                            <div>
-                            <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-wide text-gray-400">
-                                <span>Base threshold</span>
-                                <span>{baseThreshold.toFixed(2)}</span>
-                            </div>
-                            <input
-                                type="range"
-                                min={0.02}
-                                max={1}
-                                step={0.01}
-                                value={baseThreshold}
-                                onChange={(event) => setBaseThreshold(parseFloat(event.target.value))}
-                                className="w-full accent-sky-400"
-                            />
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                            <div>
-                                <div className="text-xs uppercase tracking-wide text-gray-400">Persistence k</div>
-                                <input
-                                type="number"
-                                min={1}
-                                max={48}
-                                value={persistK}
-                                onChange={(event) => {
-                                    const next = parseInt(event.target.value, 10);
-                                    if (Number.isNaN(next)) return;
-                                    setPersistK(clamp(next, 1, 48));
-                                }}
-                                className={`mt-1 w-full px-3 py-2 ${INPUT_BASE}`}
-                                />
-                            </div>
-                            <div>
-                                <div className="text-xs uppercase tracking-wide text-gray-400">Cooldown (h)</div>
-                                <input
-                                type="number"
-                                min={1}
-                                max={168}
-                                step={6}
-                                value={cooldownHours}
-                                onChange={(event) => {
-                                    const next = parseInt(event.target.value, 10);
-                                    if (Number.isNaN(next)) return;
-                                    setCooldownHours(clamp(next, 1, 168));
-                                }}
-                                className={`mt-1 w-full px-3 py-2 ${INPUT_BASE}`}
-                                />
-                            </div>
-                            </div>
-                            <div>
-                            <div className="text-xs uppercase tracking-wide text-gray-400">Regime multipliers</div>
-                            <div className="mt-2 space-y-2">
-                                {REGIMES.map((key) => (
-                                <div key={key} className="flex items-center justify-between gap-3">
-                                    <div className="flex items-center gap-2 text-sm text-gray-300">
-                                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: regimeColor(key) }} />
-                                    <span className="capitalize">{key.replace("_", " ")}</span>
-                                    </div>
-                                    <input
-                                    type="number"
-                                    step={0.05}
-                                    min={0.5}
-                                    max={2}
-                                    value={multipliers[key]}
-                                    onChange={(event) => {
-                                        const value = parseFloat(event.target.value);
-                                        if (Number.isNaN(value)) return;
-                                        setMultipliers((prev) => ({
-                                        ...prev,
-                                        [key]: clamp(value, 0.5, 2),
-                                        }));
-                                    }}
-                                    className={`w-24 px-2 py-1.5 text-right ${INPUT_BASE}`}
-                                    />
-                                </div>
-                                ))}
-                            </div>
-                            </div>
-                            {liveMetaState && (
-                            <div className="grid grid-cols-2 gap-3 text-xs text-gray-400">
-                                <div>
-                                <div className="uppercase tracking-wide">Window</div>
-                                <div className="text-white">{liveMetaState.points ?? liveItems.length} pts</div>
-                                </div>
-                                <div>
-                                <div className="uppercase tracking-wide">Alerts fired</div>
-                                <div className="text-white">{liveMetaState.alerts_fired ?? 0}</div>
-                                </div>
-                                <div>
-                                <div className="uppercase tracking-wide">High risk</div>
-                                <div className="text-white">{liveMetaState.risk_band_counts?.high ?? 0}</div>
-                                </div>
-                                <div>
-                                <div className="uppercase tracking-wide">Medium risk</div>
-                                <div className="text-white">{liveMetaState.risk_band_counts?.medium ?? 0}</div>
-                                </div>
-                            </div>
-                            )}
-                            {livePending && <div className="text-xs text-sky-200">Updating view...</div>}
-                            {liveError && <div className="text-xs text-red-300">{liveError}</div>}
-                        </div>
-                        </div>
-                        <div className={`${GLASS_TILE} p-5`}>
-                        <div className="text-lg font-semibold text-white">Live Probability vs Threshold</div>
-                        <div className="mt-4 h-[320px]">
-                            <ResponsiveContainer>
-                            <AreaChart data={liveItems}>
-                                <defs>
-                                <linearGradient id="liveProbGradient" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.6} />
-                                    <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
-                                </linearGradient>
-                                </defs>
-                                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                                <XAxis
-                                dataKey="ts"
-                                stroke="#9ca3af"
-                                fontSize={12}
-                                tickFormatter={(value) => new Date(value).toLocaleDateString()}
-                                />
-                                <YAxis stroke="#9ca3af" fontSize={12} domain={[0, 1]} />
-                                <Tooltip
-                                contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px" }}
-                                labelFormatter={(value) => new Date(value).toLocaleString()}
-                                formatter={(value, key) => {
-                                    if (key === "prob_breach7d") return [Number(value).toFixed(2), "Probability"];
-                                    if (key === "threshold_eff") return [Number(value).toFixed(2), "Threshold"];
-                                    return [value, key];
-                                }}
-                                />
-                                <Area
-                                type="monotone"
-                                dataKey="prob_breach7d"
-                                name="P(breach in 7d)"
-                                stroke="#38bdf8"
-                                strokeWidth={2}
-                                fill="url(#liveProbGradient)"
-                                />
-                                <Line
-                                type="monotone"
-                                dataKey="threshold_eff"
-                                name="Effective threshold"
-                                stroke="#fbbf24"
-                                strokeDasharray="5 4"
-                                strokeWidth={2}
-                                dot={false}
-                                />
-                                <ReferenceLine y={baseThreshold} stroke="#22c55e" strokeDasharray="3 3" label={{ value: "Base", fill: "#22c55e", fontSize: 12 }} />
-                            </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-                        </div>
-                    </div>
-                </div>
-            </AccordionItem>
-        )}
-         <div className="hidden">
-          <AccordionItem title="Performance Trends" icon={TrendIcon} defaultOpen={!hasLive}>
-             <div className={`${GLASS_TILE} p-5`}>
-                <div className="text-lg font-semibold text-white">DP Trend (Last 30 Days)</div>
-                <div className="mt-4 h-[320px]">
-                <ResponsiveContainer>
-                    <AreaChart data={strainer.historicalData}>
-                    <defs>
-                        <linearGradient id="dpGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.7} />
-                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                        </linearGradient>
-                    </defs>
-                    <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                    <XAxis
-                        dataKey="date"
-                        stroke="#9ca3af"
-                        fontSize={12}
-                        tickFormatter={(value) => {
-                        const d = new Date(value);
-                        return `${d.getMonth() + 1}/${d.getDate()}`;
-                        }}
-                    />
-                    <YAxis
-                        stroke="#9ca3af"
-                        fontSize={12}
-                        label={{ value: "DP (psi)", angle: -90, position: "insideLeft", fill: "#9ca3af" }}
-                    />
-                    <Tooltip
-                        contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px" }}
-                        labelStyle={{ color: "#e5e7eb" }}
-                        formatter={(value, key) => {
-                        if (key === "dp") return [`${value.toFixed(2)} psi`, "DP"];
-                        if (key === "flowRate") return [`${value.toFixed(0)} bbl/d`, "Flow"];
-                        if (key === "efficiency") return [`${value.toFixed(1)}%`, "Efficiency"];
-                        return [value, key];
-                        }}
-                    />
-                    <ReferenceLine y={18} stroke="#fbbf24" strokeDasharray="3 3" label={{ value: "Warning", fill: "#fbbf24", fontSize: 12 }} />
-                    <ReferenceLine y={25} stroke="#f87171" strokeDasharray="3 3" label={{ value: "Critical", fill: "#f87171", fontSize: 12 }} />
-                    <Area type="monotone" dataKey="dp" stroke="#8b5cf6" strokeWidth={2} fill="url(#dpGradient)" />
-                    </AreaChart>
-                </ResponsiveContainer>
-                </div>
-            </div>
-          </AccordionItem>
-          <AccordionItem title="Insights" icon={BrainCircuit}>
-            <div className="space-y-4">
-                 <AccordionItem title="Root Cause Analysis (RCA)" icon={FileText}>
-                     <div className="prose prose-invert max-w-none text-sm text-gray-200">
-                        {strainer.rootCauseAnalysis.split("\n").map((line, idx) => {
-                        if (line.startsWith("**") && line.endsWith("**")) {
-                            return (
-                            <h4 key={`rca-heading-${idx}`} className="text-base font-bold text-blue-300">
-                                {line.replace(/\*\*/g, "")}
-                            </h4>
-                            );
-                        }
-                        if (/^\d+\./.test(line)) {
-                            return (
-                            <p key={`rca-line-${idx}`} className="ml-4 text-gray-200">
-                                {line}
-                            </p>
-                            );
-                        }
-                        if (line.startsWith("-")) {
-                            return (
-                            <p key={`rca-bullet-${idx}`} className="ml-6 text-gray-200">
-                                {line}
-                            </p>
-                            );
-                        }
-                        if (line.trim()) {
-                            return (
-                            <p key={`rca-text-${idx}`} className="text-gray-200">
-                                {line}
-                            </p>
-                            );
-                        }
-                        return <br key={`rca-break-${idx}`} />;
-                        })}
-                    </div>
-                 </AccordionItem>
-                 <AccordionItem title="Supplier Analysis" icon={Building}>
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <div className="rounded-lg bg-white/5 p-4">
-                        <div className="text-xs uppercase tracking-wide text-gray-400">Element Supplier</div>
-                        <div className="mt-1 text-lg font-bold text-white">{strainer.supplierInfo.elementSupplier}</div>
-                        </div>
-                        <div className="rounded-lg bg-white/5 p-4">
-                        <div className="text-xs uppercase tracking-wide text-gray-400">Mesh Size</div>
-                        <div className="mt-1 text-lg font-bold text-white">{strainer.supplierInfo.meshSize} microns</div>
-                        </div>
-                        <div className="rounded-lg bg-white/5 p-4">
-                        <div className="text-xs uppercase tracking-wide text-gray-400">Material</div>
-                        <div className="mt-1 text-lg font-bold text-white">{strainer.supplierInfo.material}</div>
-                        </div>
-                        <div className="rounded-lg bg-white/5 p-4">
-                        <div className="text-xs uppercase tracking-wide text-gray-400">Last Inspection</div>
-                        <div className="mt-1 text-lg font-bold text-white">{formatDate(strainer.supplierInfo.lastInspectionDate)}</div>
-                        </div>
-                    </div>
-                 </AccordionItem>
-                 <AccordionItem title="Risk Analysis" icon={ShieldAlert}>
-                    <div className="grid gap-6 md:grid-cols-2">
-                        <div className="flex items-center gap-4">
-                        <div className={`flex h-24 w-24 flex-col items-center justify-center rounded-lg text-white ${currentRiskColor}`}>
-                            <div className="text-3xl font-extrabold">{strainer.riskAnalysis.riskScore}</div>
-                            <div className="text-xs uppercase tracking-wide">Risk Score</div>
-                        </div>
-                        <div className="text-sm text-gray-200">
-                            <div>
-                            Impact: <span className="font-semibold text-amber-300">{strainer.riskAnalysis.impact}</span>
-                            </div>
-                            <div>
-                            Probability: <span className="font-semibold text-amber-300">{strainer.riskAnalysis.probability}</span>
-                            </div>
-                        </div>
-                        </div>
-                        <div>
-                        <div className="text-sm font-semibold text-white">Mitigation Actions</div>
-                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-200">
-                            {strainer.riskAnalysis.mitigationActions.map((action, idx) => (
-                            <li key={`action-${idx}`}>{action}</li>
-                            ))}
-                        </ul>
-                        </div>
-                    </div>
-                 </AccordionItem>
-                 <AccordionItem title="Causality Analysis (5 Whys)" icon={BrainCircuit}>
-                     <div className={`mt-4 ${GLASS_TILE} p-3 text-sm text-gray-200`}>
-                         Problem Statement: {strainer.causalityAnalysis.problemStatement}
-                     </div>
-                    <div className="mt-4 space-y-3">
-                        {strainer.causalityAnalysis.fiveWhys.map((item, idx) => (
-                        <div key={`why-${idx}`} className="border-l-2 border-white/20 pl-4">
-                            <div className="text-sm font-semibold text-blue-300">{item.why}</div>
-                            <div className="text-sm text-gray-200">{`\u279C ${item.because}`}</div>
-                        </div>
-                        ))}
-                    </div>
-                 </AccordionItem>
-            </div>
-          </AccordionItem>
-          <AccordionItem title="Lifecycle Phase" icon={Calendar}>
-             <div className="space-y-6">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div className="rounded-lg bg-white/5 p-4">
-                        <div className="text-xs uppercase tracking-wide text-gray-400">Installation Date</div>
-                        <div className="mt-1 text-lg font-bold text-white">{formatDate(strainer.lifecycleInfo.installationDate)}</div>
-                    </div>
-                    <div className="rounded-lg bg-white/5 p-4">
-                        <div className="text-xs uppercase tracking-wide text-gray-400">Last Major Overhaul</div>
-                        <div className="mt-1 text-lg font-bold text-white">{formatDate(strainer.lifecycleInfo.lastOverhaulDate)}</div>
-                    </div>
-                     <div className="rounded-lg bg-white/5 p-4">
-                        <div className="text-xs uppercase tracking-wide text-gray-400">Expected End of Life</div>
-                        <div className="mt-1 text-lg font-bold text-white">{formatDate(strainer.lifecycleInfo.endOfLifeDate)}</div>
-                    </div>
-                </div>
-                 <div className={`overflow-auto ${GLASS_TILE}`}>
-                    <div className="p-4 text-sm font-semibold text-white">{maintenanceHistoryLabels.title ?? "Cleaning History"}</div>
-                     <table className="min-w-full text-xs">
-                        <thead className="bg-white/5 text-gray-400">
-                            <tr>
-                                <th className="px-4 py-2 text-left font-medium">Date</th>
-                                <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.beforeLabel ?? "DP Before"}</th>
-                                <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.afterLabel ?? "DP After"}</th>
-                                <th className="px-4 py-2 text-left font-medium">Downtime (hrs)</th>
-                                <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.descriptorLabel ?? "Debris Type"}</th>
-                            </tr>
-                        </thead>
-                         <tbody className="text-gray-200">
-                            {strainer.cleaningHistory.map((event, idx) => (
-                                <tr key={idx} className="border-t border-white/10">
-                                    <td className="px-4 py-2">{formatDate(event.date)}</td>
-                                    <td className="px-4 py-2 text-red-300">
-                                      {event.dpBefore.toFixed(2)} {maintenanceHistoryLabels.beforeUnit ?? "psi"}
-                                    </td>
-                                    <td className="px-4 py-2 text-emerald-300">
-                                      {event.dpAfter.toFixed(2)} {maintenanceHistoryLabels.afterUnit ?? "psi"}
-                                    </td>
-                                    <td className="px-4 py-2">{event.downtime}</td>
-                                    <td className="px-4 py-2">
-                                        <span className="rounded-full bg-gradient-to-br from-slate-700 to-slate-900 px-2 py-1 text-xs text-white">
-                                            {event.debrisType}
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                     </table>
-                 </div>
-            </div>
-          </AccordionItem>
-        </div>
-      </div>
     </div>
   );
 };
+
 const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, onSelectStrainer, assetConfig }) => {
   const [activeTab, setActiveTab] = useState("performance");
 
@@ -1824,6 +2186,74 @@ const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, on
   const chartLabels = assetConfig?.chartLabels ?? {};
   const maintenanceHistoryLabels = assetConfig?.maintenanceHistory ?? {};
   const chipLabel = assetConfig?.listChipLabel ?? assetConfig?.pluralLabel ?? "Assets";
+  const strainerPredictions = strainer.predictions ?? {};
+  const debrisMix = strainer.debrisMix ?? [];
+  const debrisStackData = useMemo(() => {
+    if (!debrisMix.length) return [];
+    const base = { name: "Mix" };
+    debrisMix.forEach((slice) => {
+      base[slice.type] = slice.percent;
+    });
+    return [base];
+  }, [debrisMix]);
+  const peerStats = useMemo(() => {
+    if (!strainerOptions.length) return null;
+    const peers = strainerOptions.filter((asset) => asset.id !== strainer.id && asset.currentMetrics && asset.trends);
+    const pool = peers.length ? peers : strainerOptions;
+    if (!pool.length) return null;
+    const totals = pool.reduce(
+      (acc, asset) => {
+        acc.dp += asset.currentMetrics?.differentialPressure ?? 0;
+        acc.dpRate += asset.trends?.dpRate ?? 0;
+        acc.efficiency += asset.currentMetrics?.efficiency ?? 0;
+        return acc;
+      },
+      { dp: 0, dpRate: 0, efficiency: 0 },
+    );
+    const divisor = pool.length;
+    return {
+      avgDp: totals.dp / divisor,
+      avgDpRate: totals.dpRate / divisor,
+      avgEfficiency: totals.efficiency / divisor,
+    };
+  }, [strainerOptions, strainer]);
+  const dpDelta = peerStats ? strainer.currentMetrics.differentialPressure - peerStats.avgDp : 0;
+  const foulingDelta = peerStats ? strainer.trends.dpRate - peerStats.avgDpRate : 0;
+  const efficiencyDelta = peerStats ? strainer.currentMetrics.efficiency - peerStats.avgEfficiency : 0;
+  const anomalyCallouts = [
+    {
+      label: "DP vs Fleet",
+      value: `${dpDelta >= 0 ? "+" : ""}${dpDelta.toFixed(1)} psi`,
+      tone: dpDelta >= 0 ? "text-rose-300" : "text-emerald-300",
+      description: dpDelta >= 0 ? "Running hotter than fleet median" : "Below fleet differential",
+    },
+    {
+      label: "Fouling Rate",
+      value: `${foulingDelta >= 0 ? "+" : ""}${foulingDelta.toFixed(2)} psi/day`,
+      tone: foulingDelta >= 0 ? "text-amber-300" : "text-emerald-300",
+      description: foulingDelta >= 0 ? "Acceleration vs baseline" : "On pace with fleet",
+    },
+    {
+      label: "Efficiency Delta",
+      value: `${efficiencyDelta >= 0 ? "+" : ""}${efficiencyDelta.toFixed(1)}%`,
+      tone: efficiencyDelta >= 0 ? "text-sky-300" : "text-rose-300",
+      description: efficiencyDelta >= 0 ? "Headroom remaining" : "Below fleet efficiency",
+    },
+  ];
+  const nextCleanCountdown = useMemo(() => {
+    const due = strainer.trends?.nextCleanDue;
+    if (!due) return strainerPredictions.daysToCritical ?? 0;
+    const dueDate = new Date(due);
+    if (Number.isNaN(dueDate.getTime())) return strainerPredictions.daysToCritical ?? 0;
+    const days = Math.max(0, Math.round((dueDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+    return days;
+  }, [strainer.trends?.nextCleanDue, strainerPredictions.daysToCritical]);
+  const debrisColors = {
+    "Sand/Silt": "#facc15",
+    "Corrosion Products": "#f97316",
+    Scale: "#a855f7",
+    "Polymer Residue": "#38bdf8",
+  };
   const overviewTabs = [
     {
       key: "performance",
@@ -1886,6 +2316,134 @@ const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, on
                 <Area type="monotone" dataKey="dp" stroke="#8b5cf6" strokeWidth={2} fill="url(#dpGradientTop)" />
               </AreaChart>
             </ResponsiveContainer>
+          </div>
+          {debrisStackData.length > 0 && (
+            <div className="mt-6">
+              <div className="flex items-center justify-between text-sm text-white">
+                <span>Debris Composition</span>
+                <span className="text-xs uppercase tracking-wide text-gray-400">
+                  Last {strainer.cleaningHistory?.length ?? 0} cleans
+                </span>
+              </div>
+              <div className="mt-3 h-40">
+                <ResponsiveContainer>
+                  <BarChart data={debrisStackData}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <XAxis dataKey="name" hide />
+                    <YAxis stroke="#9ca3af" fontSize={12} unit="%" />
+                    <Tooltip
+                      contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px" }}
+                      labelStyle={{ color: "#e5e7eb" }}
+                      formatter={(value, name) => {
+                        const formatted = typeof value === "number" ? `${value.toFixed(1)}%` : value;
+                        return [formatted, name];
+                      }}
+                    />
+                    {debrisMix.map((slice) => (
+                      <Bar
+                        key={`debris-${slice.type}`}
+                        dataKey={slice.type}
+                        stackId="mix"
+                        fill={debrisColors[slice.type] ?? "#f472b6"}
+                        radius={[6, 6, 6, 6]}
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-400">
+                {debrisMix.map((slice) => (
+                  <span key={`legend-${slice.type}`} className="flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: debrisColors[slice.type] ?? "#f472b6" }}
+                    />
+                    <span>
+                      {slice.type} · {slice.percent}%
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "tuning",
+      title: "Live KPI Tuning",
+      icon: Activity,
+      content: (
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <PredictionCard
+              title="Fouling Rate"
+              value={`${strainerPredictions.foulingRate ?? strainer.trends.dpRate?.toFixed(2) ?? 0} psi/day`}
+              description="Current modeled rate"
+            />
+            <PredictionCard
+              title="Days To Critical"
+              value={formatTimeRemaining(strainerPredictions.daysToCritical ?? 0)}
+              description="Projected breach window"
+            />
+            <PredictionCard
+              title="Cleaning Window"
+              value={formatTimeRemaining(nextCleanCountdown)}
+              description={`Next clean ${formatDate(strainer.trends?.nextCleanDue)}`}
+            />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className={`${GLASS_TILE} p-4`}>
+              <div className="text-sm font-semibold text-white">Fleet Comparison</div>
+              <div className="mt-3 space-y-2 text-xs text-gray-300">
+                <div className="flex items-center justify-between">
+                  <span>Δ DP vs fleet</span>
+                  <span className={dpDelta >= 0 ? "text-rose-300" : "text-emerald-300"}>
+                    {dpDelta >= 0 ? "+" : ""}
+                    {dpDelta.toFixed(1)} psi
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Δ Fouling rate</span>
+                  <span className={foulingDelta >= 0 ? "text-amber-300" : "text-emerald-300"}>
+                    {foulingDelta >= 0 ? "+" : ""}
+                    {foulingDelta.toFixed(2)} psi/day
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Δ Efficiency</span>
+                  <span className={efficiencyDelta >= 0 ? "text-sky-300" : "text-rose-300"}>
+                    {efficiencyDelta >= 0 ? "+" : ""}
+                    {efficiencyDelta.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-xs uppercase tracking-wide text-gray-500">Maintenance overlay</div>
+                  <div className="text-sm text-white">
+                    {formatTimeRemaining(strainerPredictions.daysToCritical ?? 0)} to breach vs{" "}
+                    {formatTimeRemaining(nextCleanCountdown)}{" "}
+                    scheduled clean
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className={`${GLASS_TILE} p-4`}>
+              <div className="text-sm font-semibold text-white">Anomaly Callouts</div>
+              <div className="mt-3 space-y-3 text-xs text-gray-300">
+                {anomalyCallouts.map((callout, idx) => (
+                  <div
+                    key={`callout-${idx}`}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-white">{callout.label}</span>
+                      <span className={`text-sm font-semibold ${callout.tone}`}>{callout.value}</span>
+                    </div>
+                    <div className="mt-1 text-[11px] uppercase tracking-wide text-gray-500">{callout.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       ),
@@ -2128,8 +2686,8 @@ export default function App() {
   const [assetMenuOpen, setAssetMenuOpen] = useState(false);
   const realAsset = useMemo(() => {
     if (activeAssetKey !== "strainers") return null;
-    return createRealStrainer(kpis, explanation, meta, summary);
-  }, [activeAssetKey, kpis, explanation, meta, summary]);
+    return createRealStrainer(kpis, explanation, meta);
+  }, [activeAssetKey, kpis, explanation, meta]);
   const mockAssets = useMemo(() => assetConfig.generateMockData(6), [assetConfig]);
   const assetFleet = useMemo(() => {
     const base = [...mockAssets];
@@ -2374,13 +2932,19 @@ export default function App() {
         </section>
         {selectedAsset && (
           <section className="space-y-4">
-            <StrainerOverviewPanels
-              strainer={selectedAsset}
-              strainerOptions={filteredAssets}
-              selectedId={selectedId}
-              onSelectStrainer={setSelectedId}
-              assetConfig={assetConfig}
-            />
+            {assetConfig.key === "compressors" ? (
+              <CompressorOverviewPanels compressor={selectedAsset} />
+            ) : assetConfig.key === "pipelines" ? (
+              <PipelineOverviewPanels pipeline={selectedAsset} />
+            ) : (
+              <StrainerOverviewPanels
+                strainer={selectedAsset}
+                strainerOptions={filteredAssets}
+                selectedId={selectedId}
+                onSelectStrainer={setSelectedId}
+                assetConfig={assetConfig}
+              />
+            )}
           </section>
         )}
         <section className="flex min-h-[600px] flex-1 gap-6">
@@ -2454,6 +3018,10 @@ export default function App() {
     </div>
   );
 }
+
+
+
+
 
 
 
