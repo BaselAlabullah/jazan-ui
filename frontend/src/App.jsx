@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Activity,
@@ -47,25 +47,6 @@ import {
   INPUT_BASE,
 } from "./constants/ui";
 
-const resolveBackendBase = () => {
-  const env = import.meta.env || {};
-  if (env.VITE_BACKEND_URL) {
-    return env.VITE_BACKEND_URL.replace(/\/$/, "");
-  }
-  const protocol = (env.VITE_BACKEND_PROTOCOL || (typeof window !== "undefined" ? window.location.protocol : "http:")).replace(/:?$/, ":");
-  const host = env.VITE_BACKEND_HOST || (typeof window !== "undefined" ? window.location.hostname : "127.0.0.1");
-  const port = env.VITE_BACKEND_PORT || "8100";
-  return `${protocol}//${host}${port ? `:${port}` : ""}`;
-};
-
-const API_BASE = resolveBackendBase();
-const buildApiUrl = (path) => {
-  if (!path.startsWith("/")) {
-    return `${API_BASE}/${path}`;
-  }
-  return `${API_BASE}${path}`;
-};
-const apiFetch = (path, options) => fetch(buildApiUrl(path), options);
 const PSI_PER_MBAR = 0.0145038;
 const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -190,6 +171,24 @@ const buildRootCauseAnalysis = (explanation, lastPoint, dpPsi, flowRate, efficie
     lines.push("- Continue standard monitoring cadence and follow breach response checklist if persistence criteria are met.");
   }
   return lines.join("\n");
+};
+const buildAssetLanguageReplacements = (singular, plural) => [
+  { pattern: /\bStrainers\b/g, replacement: plural },
+  { pattern: /\bstrainers\b/g, replacement: plural.toLowerCase() },
+  { pattern: /\bStrainer\b/g, replacement: singular },
+  { pattern: /\bstrainer\b/g, replacement: singular.toLowerCase() },
+];
+const replaceAssetLanguage = (value, replacements = []) => {
+  if (typeof value === "string") {
+    return replacements.reduce((text, { pattern, replacement }) => text.replace(pattern, replacement), value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceAssetLanguage(entry, replacements));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, replaceAssetLanguage(entry, replacements)]));
+  }
+  return value;
 };
 const deriveMetricTrendsForStrainer = (strainer) => {
   if (!strainer) return {};
@@ -523,7 +522,221 @@ const generateMockStrainerData = (count = 6) => {
     };
   });
 };
-const RiskMatrix = ({ fleet = [], selected }) => {
+const PIPELINE_LOCATIONS = [
+  { corridor: "Export Loop A", station: "Block Valve BV-401", section: "North Span" },
+  { corridor: "Export Loop A", station: "Pump Station PS-2", section: "Desert Crossing" },
+  { corridor: "Products Trunk B", station: "Metering Skid MS-7", section: "Coastal Reach" },
+  { corridor: "Gathering Spine C", station: "Launcher Station LS-3", section: "Mountain Pass" },
+  { corridor: "Jet Fuel Spur D", station: "Block Valve BV-812", section: "Terminal Approach" },
+  { corridor: "Arab Light Loop E", station: "Pump Station PS-9", section: "Plateau Span" },
+  { corridor: "Gas Condensate Spur F", station: "Metering Skid MS-11", section: "Marsh Crossing" },
+];
+const FUEL_CONTAINER_LOCATIONS = [
+  { terminal: "Bulk Terminal North", tank: "TK-201 Floating Roof", position: "Bay 2" },
+  { terminal: "Bulk Terminal North", tank: "TK-203 Floating Roof", position: "Bay 3" },
+  { terminal: "West Logistics Park", tank: "Spherical LPG V-15", position: "Pad 1" },
+  { terminal: "East Tank Farm", tank: "Diesel Bullet T-44", position: "Pod C" },
+  { terminal: "Marine Export Yard", tank: "Gasoline Tank TK-118", position: "Berth Hold" },
+  { terminal: "Aviation Fuel Annex", tank: "Jet A-1 TK-502", position: "Wing Row" },
+];
+const generateMockPipelineData = (count = 6) => {
+  const replacements = [
+    ...buildAssetLanguageReplacements("Pipeline Segment", "Pipeline Segments"),
+    { pattern: /\belement\b/gi, replacement: "segment" },
+    { pattern: /\bmesh\b/gi, replacement: "wall thickness" },
+    { pattern: /\bcleaning\b/gi, replacement: "pigging" },
+    { pattern: /\bclean\b/gi, replacement: "pig" },
+  ];
+  const baseFleet = generateMockStrainerData(count);
+  return baseFleet.map((asset, idx) => {
+    const location = PIPELINE_LOCATIONS[idx % PIPELINE_LOCATIONS.length];
+    const adapted = replaceAssetLanguage(asset, replacements);
+    return {
+      ...adapted,
+      id: `PIPE-${401 + idx}`,
+      assetCategory: "Pipeline",
+      location: {
+        unit: location.corridor,
+        pump: location.station,
+        position: location.section,
+      },
+    };
+  });
+};
+const generateMockPetrolContainerData = (count = 6) => {
+  const replacements = [
+    ...buildAssetLanguageReplacements("Fuel Container", "Fuel Containers"),
+    { pattern: /\bmesh\b/gi, replacement: "roof" },
+    { pattern: /\bcleaning\b/gi, replacement: "wash" },
+    { pattern: /\bclean\b/gi, replacement: "wash" },
+  ];
+  const baseFleet = generateMockStrainerData(count);
+  return baseFleet.map((asset, idx) => {
+    const location = FUEL_CONTAINER_LOCATIONS[idx % FUEL_CONTAINER_LOCATIONS.length];
+    const adapted = replaceAssetLanguage(asset, replacements);
+    return {
+      ...adapted,
+      id: `FUEL-${301 + idx}`,
+      assetCategory: "Fuel Storage",
+      location: {
+        unit: location.terminal,
+        pump: location.tank,
+        position: location.position,
+      },
+    };
+  });
+};
+const ASSET_CONFIGS = {
+  strainers: {
+    key: "strainers",
+    navLabel: "Strainers",
+    label: "Strainer",
+    pluralLabel: "Strainers",
+    heroTitle: "Strainer Monitoring Command",
+    heroTagline: "Refinery-wide strainer performance dashboard",
+    heroBadge: "Live Feed",
+    icon: Filter,
+    fleetTitle: "Strainer Fleet",
+    searchPlaceholder: "Search by ID, unit, pump...",
+    emptyStateTitle: "No Strainers Found",
+    emptyStateSubtitle: "Try adjusting search or filters.",
+    listChipLabel: "Strainers",
+    cardLabels: { dp: "DP", flow: "Flow", efficiency: "Efficiency", since: "Since clean", sinceSuffix: "d" },
+    cardUnits: { dp: "psi", flow: "bbl/d", efficiency: "%", since: "d" },
+    detailMetricLabels: {
+      dp: "Differential Pressure",
+      flow: "Flow Rate",
+      efficiency: "Efficiency",
+      daysSinceClean: "Days Since Clean",
+      dpRate: "DP Rate",
+      designFlow: "Design Flow",
+    },
+    detailMetricUnits: {
+      dp: "psi",
+      flow: "bbl/d",
+      efficiency: "%",
+      daysSinceClean: "days",
+      dpRate: "psi/day",
+      designFlow: "bbl/d",
+    },
+    chartLabels: {
+      dpTrendTitle: "DP Trend (Last 30 Days)",
+      dpAxis: "DP (psi)",
+      tooltipDp: "DP",
+      tooltipFlow: "Flow",
+      tooltipEfficiency: "Efficiency",
+    },
+    maintenanceHistory: {
+      title: "Cleaning History",
+      beforeLabel: "DP Before",
+      afterLabel: "DP After",
+      descriptorLabel: "Debris Type",
+      beforeUnit: "psi",
+      afterUnit: "psi",
+    },
+    generateMockData: (count = 6) => generateMockStrainerData(count),
+  },
+  pipelines: {
+    key: "pipelines",
+    navLabel: "Pipelines",
+    label: "Pipeline Segment",
+    pluralLabel: "Pipeline Segments",
+    heroTitle: "Pipeline Integrity Command",
+    heroTagline: "Transmission and gathering line performance dashboard",
+    heroBadge: "Assets",
+    icon: Gauge,
+    fleetTitle: "Pipeline Fleet",
+    searchPlaceholder: "Search by corridor, station, ID...",
+    emptyStateTitle: "No Pipelines Found",
+    emptyStateSubtitle: "Adjust corridor or status filters.",
+    listChipLabel: "Pipelines",
+    cardLabels: { dp: "Pressure Drop", flow: "Throughput", efficiency: "Integrity", since: "Since pigging", sinceSuffix: "d" },
+    cardUnits: { dp: "psi", flow: "kbpd", efficiency: "%", since: "d" },
+    detailMetricLabels: {
+      dp: "Pressure Drop",
+      flow: "Throughput",
+      efficiency: "Integrity",
+      daysSinceClean: "Days Since Pigging",
+      dpRate: "Drop Rate",
+      designFlow: "Design Capacity",
+    },
+    detailMetricUnits: {
+      dp: "psi",
+      flow: "kbpd",
+      efficiency: "%",
+      daysSinceClean: "days",
+      dpRate: "psi/day",
+      designFlow: "kbpd",
+    },
+    chartLabels: {
+      dpTrendTitle: "Pressure Drop Trend (30 Days)",
+      dpAxis: "Drop (psi)",
+      tooltipDp: "Drop",
+      tooltipFlow: "Flow",
+      tooltipEfficiency: "Integrity",
+    },
+    maintenanceHistory: {
+      title: "Inspection History",
+      beforeLabel: "Pressure Before",
+      afterLabel: "Pressure After",
+      descriptorLabel: "Tool Pass",
+      beforeUnit: "psi",
+      afterUnit: "psi",
+    },
+    generateMockData: generateMockPipelineData,
+  },
+  petrol: {
+    key: "petrol",
+    navLabel: "Petrol Containers",
+    label: "Fuel Container",
+    pluralLabel: "Fuel Containers",
+    heroTitle: "Storage Reliability Command",
+    heroTagline: "Floating roof and bullet tank readiness dashboard",
+    heroBadge: "Assets",
+    icon: Droplets,
+    fleetTitle: "Container Fleet",
+    searchPlaceholder: "Search by tank ID, terminal, segment...",
+    emptyStateTitle: "No Containers Found",
+    emptyStateSubtitle: "Try another tank ID or status.",
+    listChipLabel: "Containers",
+    cardLabels: { dp: "Head Pressure", flow: "Withdrawal", efficiency: "Product Quality", since: "Since wash", sinceSuffix: "d" },
+    cardUnits: { dp: "psi", flow: "bbl/d", efficiency: "%", since: "d" },
+    detailMetricLabels: {
+      dp: "Head Pressure",
+      flow: "Withdrawal Rate",
+      efficiency: "Product Quality",
+      daysSinceClean: "Days Since Wash",
+      dpRate: "Head Rate",
+      designFlow: "Design Withdrawal",
+    },
+    detailMetricUnits: {
+      dp: "psi",
+      flow: "bbl/d",
+      efficiency: "%",
+      daysSinceClean: "days",
+      dpRate: "psi/day",
+      designFlow: "bbl/d",
+    },
+    chartLabels: {
+      dpTrendTitle: "Head Pressure Trend (30 Days)",
+      dpAxis: "Head (psi)",
+      tooltipDp: "Head",
+      tooltipFlow: "Withdrawal",
+      tooltipEfficiency: "Quality",
+    },
+    maintenanceHistory: {
+      title: "Wash / Inspection History",
+      beforeLabel: "Head Before",
+      afterLabel: "Head After",
+      descriptorLabel: "Residue",
+      beforeUnit: "psi",
+      afterUnit: "psi",
+    },
+    generateMockData: generateMockPetrolContainerData,
+  },
+};
+const ASSET_ORDER = Object.keys(ASSET_CONFIGS);
+const RiskMatrix = ({ fleet = [], selected, assetLabel = "Asset", assetLabelPlural = "Assets" }) => {
   const probabilityLevels = ["Very Low", "Low", "Medium", "High", "Very High"];
   const impactLevels = ["Very High", "High", "Medium", "Low", "Very Low"]; // top to bottom
   const matrix = impactLevels.map(() => probabilityLevels.map(() => 0));
@@ -589,11 +802,11 @@ const RiskMatrix = ({ fleet = [], selected }) => {
                       className={`flex h-full w-full flex-col items-center justify-center rounded-xl border bg-gradient-to-br ${gradient} ${border} text-white shadow-inner transition-transform duration-200 ${
                         isSelected ? "ring-2 ring-white/80 ring-offset-2 ring-offset-slate-950 scale-[1.02]" : ""
                       }`}
-                      title={`${count} strainer${count === 1 ? "" : "s"} in ${formatLabel(impact)} impact / ${formatLabel(prob)} probability`}
+                      title={`${count} ${count === 1 ? assetLabel : assetLabelPlural} in ${formatLabel(impact)} impact / ${formatLabel(prob)} probability`}
                     >
                       <div className="text-lg font-bold">{count}</div>
                       <div className="text-[10px] uppercase tracking-wide text-white/80">
-                        {count === 1 ? "Strainer" : "Strainers"}
+                        {count === 1 ? assetLabel : assetLabelPlural}
                       </div>
                     </div>
                   </div>
@@ -746,7 +959,7 @@ const createRealStrainer = (kpis, explanation, meta, summary) => {
     metricTrends: deriveMetricTrendsForStrainer(strainer),
   };
 };
-const StrainerCard = ({ strainer, onSelect, isSelected }) => {
+const StrainerCard = ({ strainer, onSelect, isSelected, assetConfig }) => {
   const statusGlows = {
     alert: "ring-rose-500/50 shadow-[0_0_35px_rgba(244,63,94,0.35)]",
     warning: "ring-amber-400/50 shadow-[0_0_35px_rgba(245,158,11,0.35)]",
@@ -757,6 +970,16 @@ const StrainerCard = ({ strainer, onSelect, isSelected }) => {
     warning: "from-amber-400 via-yellow-400 to-emerald-300",
     normal: "from-emerald-400 via-sky-400 to-indigo-400",
   };
+  const cardLabels = assetConfig?.cardLabels ?? {};
+  const cardUnits = assetConfig?.cardUnits ?? {};
+  const dpLabel = cardLabels.dp ?? "DP";
+  const flowLabel = cardLabels.flow ?? "Flow";
+  const efficiencyLabel = cardLabels.efficiency ?? "Efficiency";
+  const sinceLabel = cardLabels.since ?? "Since clean";
+  const sinceSuffix = cardLabels.sinceSuffix ?? cardUnits.since ?? "d";
+  const dpUnit = cardUnits.dp ?? "psi";
+  const flowUnit = cardUnits.flow ?? "bbl/d";
+  const efficiencyUnit = cardUnits.efficiency ?? "%";
   return (
     <div
       onClick={() => onSelect(strainer.id)}
@@ -781,26 +1004,29 @@ const StrainerCard = ({ strainer, onSelect, isSelected }) => {
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-gray-300">
         <div>
-          <div className="uppercase tracking-wide text-gray-500">DP</div>
+          <div className="uppercase tracking-wide text-gray-500">{dpLabel}</div>
           <div className="font-semibold text-white">
-            {strainer.currentMetrics.differentialPressure.toFixed(2)} psi
+            {strainer.currentMetrics.differentialPressure.toFixed(2)} {dpUnit}
           </div>
         </div>
         <div>
-          <div className="uppercase tracking-wide text-gray-500">Flow</div>
+          <div className="uppercase tracking-wide text-gray-500">{flowLabel}</div>
           <div className="font-semibold text-white">
-            {strainer.currentMetrics.flowRate.toFixed(0)} bbl/d
+            {strainer.currentMetrics.flowRate.toFixed(0)} {flowUnit}
           </div>
         </div>
         <div>
-          <div className="uppercase tracking-wide text-gray-500">Efficiency</div>
+          <div className="uppercase tracking-wide text-gray-500">{efficiencyLabel}</div>
           <div className="font-semibold text-white">
-            {strainer.currentMetrics.efficiency.toFixed(1)}%
+            {strainer.currentMetrics.efficiency.toFixed(1)}
+            {efficiencyUnit}
           </div>
         </div>
         <div>
-          <div className="uppercase tracking-wide text-gray-500">Since clean</div>
-          <div className="font-semibold text-white">{strainer.trends.daysSinceClean} d</div>
+          <div className="uppercase tracking-wide text-gray-500">{sinceLabel}</div>
+          <div className="font-semibold text-white">
+            {strainer.trends.daysSinceClean} {sinceSuffix}
+          </div>
         </div>
       </div>
     </div>
@@ -880,7 +1106,7 @@ const GuidanceCard = ({ guidance }) => {
     </div>
   );
 };
-const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, liveMeta, fleet = [] }) => {
+const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, liveMeta, fleet = [], assetConfig }) => {
   const hasLive = Boolean(strainer?.isReal);
   const REGIMES = ["normal", "post_startup", "low_load", "shutdown"];
   const defaultMultipliers = summary?.regime_threshold_multipliers ?? {
@@ -912,47 +1138,10 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
   }, [hasLive, strainer?.id, summary, liveKpis, liveExplanation, liveMeta]);
   useEffect(() => {
     if (!hasLive) return;
-    if (!strainer) return;
-    const controller = new AbortController();
-    setLivePending(true);
+    setLivePending(false);
     setLiveError(null);
-    const timer = setTimeout(async () => {
-      try {
-        const params = new URLSearchParams({
-          base_thr: baseThreshold.toString(),
-          persist_k: persistK.toString(),
-          cooldown_h: cooldownHours.toString(),
-          m_normal: multipliers.normal.toString(),
-          m_post: multipliers.post_startup.toString(),
-          m_low: multipliers.low_load.toString(),
-          m_shut: multipliers.shutdown.toString(),
-        });
-        const resp = await apiFetch(`/api/kpis?${params.toString()}`, { signal: controller.signal });
-        if (!resp.ok) {
-          throw new Error(`Failed to load tuned KPIs (${resp.status})`);
-        }
-        const payload = await resp.json();
-        if (controller.signal.aborted) return;
-        setLiveItems(payload.items || []);
-        setLiveExplanationState(payload.explanation || null);
-        setLiveMetaState(payload.meta || null);
-        setLiveError(null);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setLiveError(error.message || "Failed to load tuned KPIs.");
-      } finally {
-        if (!controller.signal.aborted) {
-          setLivePending(false);
-        }
-      }
-    }, 300);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
   }, [
     hasLive,
-    strainer,
     baseThreshold,
     persistK,
     cooldownHours,
@@ -1012,10 +1201,11 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
     return deriveMetricTrendsForStrainer(strainer);
   }, [strainer]);
 
+  const assetLabelLower = assetConfig?.label ? assetConfig.label.toLowerCase() : "asset";
   if (!strainer) {
     return (
       <div className="flex h-full items-center justify-center p-10 text-2xl text-gray-500">
-        Select a strainer to view its diagnostics
+        Select a {assetLabelLower} to view its diagnostics
       </div>
     );
   }
@@ -1057,6 +1247,9 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
       noChangeLabel: "At threshold",
     };
   })();
+  const detailMetricLabels = assetConfig?.detailMetricLabels ?? {};
+  const detailMetricUnits = assetConfig?.detailMetricUnits ?? {};
+  const maintenanceHistoryLabels = assetConfig?.maintenanceHistory ?? {};
   return (
     <div className="h-full overflow-y-auto rounded-3xl bg-transparent p-6">
       <div className="flex items-start justify-between border-b border-white/10 pb-4">
@@ -1079,49 +1272,54 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <MetricDisplay
               icon={Gauge}
-              label="Differential Pressure"
+              label={detailMetricLabels.dp ?? "Differential Pressure"}
               value={strainer.currentMetrics.differentialPressure.toFixed(2)}
-              unit="psi"
+              unit={detailMetricUnits.dp ?? "psi"}
               trend={dpTrendMeta}
             />
             <MetricDisplay
               icon={Droplets}
-              label="Flow Rate"
+              label={detailMetricLabels.flow ?? "Flow Rate"}
               value={strainer.currentMetrics.flowRate.toFixed(0)}
-              unit="bbl/d"
+              unit={detailMetricUnits.flow ?? "bbl/d"}
               trend={flowTrendMeta}
             />
             <MetricDisplay
               icon={TrendingUp}
-              label="Efficiency"
+              label={detailMetricLabels.efficiency ?? "Efficiency"}
               value={strainer.currentMetrics.efficiency.toFixed(1)}
-              unit="%"
+              unit={detailMetricUnits.efficiency ?? "%"}
               trend={efficiencyTrendMeta}
             />
             <MetricDisplay
               icon={Clock}
-              label="Days Since Clean"
+              label={detailMetricLabels.daysSinceClean ?? "Days Since Clean"}
               value={strainer.trends.daysSinceClean}
-              unit="days"
+              unit={detailMetricUnits.daysSinceClean ?? "days"}
               trend={daysSinceCleanTrendMeta}
             />
             <MetricDisplay
               icon={Activity}
-              label="DP Rate"
+              label={detailMetricLabels.dpRate ?? "DP Rate"}
               value={strainer.trends.dpRate.toFixed(2)}
-              unit="psi/day"
+              unit={detailMetricUnits.dpRate ?? "psi/day"}
               trend={dpRateTrendMeta}
             />
             <MetricDisplay
               icon={Zap}
-              label="Design Flow"
+              label={detailMetricLabels.designFlow ?? "Design Flow"}
               value={strainer.currentMetrics.designFlowRate}
-              unit="bbl/d"
+              unit={detailMetricUnits.designFlow ?? "bbl/d"}
             />
         </div>
       </div>
       <div className="my-10 space-y-4">
-        <RiskMatrix fleet={fleet} selected={strainer} />
+        <RiskMatrix
+          fleet={fleet}
+          selected={strainer}
+          assetLabel={assetConfig?.label ?? "Asset"}
+          assetLabelPlural={assetConfig?.pluralLabel ?? "Assets"}
+        />
         {hasFleetSummary && (
           <div className={`${GLASS_TILE} p-4`}>
             <div className="text-sm font-semibold text-white">Matrix Overview</div>
@@ -1514,23 +1712,27 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
                     </div>
                 </div>
                  <div className={`overflow-auto ${GLASS_TILE}`}>
-                    <div className="p-4 text-sm font-semibold text-white">Cleaning History</div>
+                    <div className="p-4 text-sm font-semibold text-white">{maintenanceHistoryLabels.title ?? "Cleaning History"}</div>
                      <table className="min-w-full text-xs">
                         <thead className="bg-white/5 text-gray-400">
                             <tr>
                                 <th className="px-4 py-2 text-left font-medium">Date</th>
-                                <th className="px-4 py-2 text-left font-medium">DP Before</th>
-                                <th className="px-4 py-2 text-left font-medium">DP After</th>
+                                <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.beforeLabel ?? "DP Before"}</th>
+                                <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.afterLabel ?? "DP After"}</th>
                                 <th className="px-4 py-2 text-left font-medium">Downtime (hrs)</th>
-                                <th className="px-4 py-2 text-left font-medium">Debris Type</th>
+                                <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.descriptorLabel ?? "Debris Type"}</th>
                             </tr>
                         </thead>
                          <tbody className="text-gray-200">
                             {strainer.cleaningHistory.map((event, idx) => (
                                 <tr key={idx} className="border-t border-white/10">
                                     <td className="px-4 py-2">{formatDate(event.date)}</td>
-                                    <td className="px-4 py-2 text-red-300">{event.dpBefore.toFixed(2)} psi</td>
-                                    <td className="px-4 py-2 text-emerald-300">{event.dpAfter.toFixed(2)} psi</td>
+                                    <td className="px-4 py-2 text-red-300">
+                                      {event.dpBefore.toFixed(2)} {maintenanceHistoryLabels.beforeUnit ?? "psi"}
+                                    </td>
+                                    <td className="px-4 py-2 text-emerald-300">
+                                      {event.dpAfter.toFixed(2)} {maintenanceHistoryLabels.afterUnit ?? "psi"}
+                                    </td>
                                     <td className="px-4 py-2">{event.downtime}</td>
                                     <td className="px-4 py-2">
                                         <span className="rounded-full bg-gradient-to-br from-slate-700 to-slate-900 px-2 py-1 text-xs text-white">
@@ -1549,7 +1751,7 @@ const StrainerDetailView = ({ strainer, summary, liveKpis, liveExplanation, live
     </div>
   );
 };
-const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, onSelectStrainer }) => {
+const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, onSelectStrainer, assetConfig }) => {
   const [activeTab, setActiveTab] = useState("performance");
 
   useEffect(() => {
@@ -1570,6 +1772,9 @@ const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, on
     normal: "bg-emerald-300",
   };
 
+  const chartLabels = assetConfig?.chartLabels ?? {};
+  const maintenanceHistoryLabels = assetConfig?.maintenanceHistory ?? {};
+  const chipLabel = assetConfig?.listChipLabel ?? assetConfig?.pluralLabel ?? "Assets";
   const overviewTabs = [
     {
       key: "performance",
@@ -1577,7 +1782,7 @@ const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, on
       icon: TrendIcon,
       content: (
         <div className={`${GLASS_TILE} p-5`}>
-          <div className="text-lg font-semibold text-white">DP Trend (Last 30 Days)</div>
+          <div className="text-lg font-semibold text-white">{chartLabels.dpTrendTitle ?? "DP Trend (Last 30 Days)"}</div>
           <div className="mt-4 h-[320px]">
             <ResponsiveContainer>
               <AreaChart data={strainer.historicalData}>
@@ -1600,15 +1805,20 @@ const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, on
                 <YAxis
                   stroke="#9ca3af"
                   fontSize={12}
-                  label={{ value: "DP (psi)", angle: -90, position: "insideLeft", fill: "#9ca3af" }}
+                  label={{
+                    value: chartLabels.dpAxis ?? "DP (psi)",
+                    angle: -90,
+                    position: "insideLeft",
+                    fill: "#9ca3af",
+                  }}
                 />
                 <Tooltip
                   contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px" }}
                   labelStyle={{ color: "#e5e7eb" }}
                   formatter={(value, key) => {
-                    if (key === "dp") return [`${value.toFixed(2)} psi`, "DP"];
-                    if (key === "flowRate") return [`${value.toFixed(0)} bbl/d`, "Flow"];
-                    if (key === "efficiency") return [`${value.toFixed(1)}%`, "Efficiency"];
+                    if (key === "dp") return [`${value.toFixed(2)} psi`, chartLabels.tooltipDp ?? "DP"];
+                    if (key === "flowRate") return [`${value.toFixed(0)} bbl/d`, chartLabels.tooltipFlow ?? "Flow"];
+                    if (key === "efficiency") return [`${value.toFixed(1)}%`, chartLabels.tooltipEfficiency ?? "Efficiency"];
                     return [value, key];
                   }}
                 />
@@ -1755,23 +1965,27 @@ const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, on
             </div>
           </div>
           <div className={`overflow-auto ${GLASS_TILE}`}>
-            <div className="p-4 text-sm font-semibold text-white">Cleaning History</div>
+            <div className="p-4 text-sm font-semibold text-white">{maintenanceHistoryLabels.title ?? "Cleaning History"}</div>
             <table className="min-w-full text-xs">
               <thead className="bg-white/5 text-gray-400">
                 <tr>
                   <th className="px-4 py-2 text-left font-medium">Date</th>
-                  <th className="px-4 py-2 text-left font-medium">DP Before</th>
-                  <th className="px-4 py-2 text-left font-medium">DP After</th>
+                  <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.beforeLabel ?? "DP Before"}</th>
+                  <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.afterLabel ?? "DP After"}</th>
                   <th className="px-4 py-2 text-left font-medium">Downtime (hrs)</th>
-                  <th className="px-4 py-2 text-left font-medium">Debris Type</th>
+                  <th className="px-4 py-2 text-left font-medium">{maintenanceHistoryLabels.descriptorLabel ?? "Debris Type"}</th>
                 </tr>
               </thead>
               <tbody className="text-gray-200">
                 {strainer.cleaningHistory.map((event, idx) => (
                   <tr key={`cleaning-top-${idx}`} className="border-t border-white/10">
                     <td className="px-4 py-2">{formatDate(event.date)}</td>
-                    <td className="px-4 py-2 text-red-300">{event.dpBefore.toFixed(2)} psi</td>
-                    <td className="px-4 py-2 text-emerald-300">{event.dpAfter.toFixed(2)} psi</td>
+                    <td className="px-4 py-2 text-red-300">
+                      {event.dpBefore.toFixed(2)} {maintenanceHistoryLabels.beforeUnit ?? "psi"}
+                    </td>
+                    <td className="px-4 py-2 text-emerald-300">
+                      {event.dpAfter.toFixed(2)} {maintenanceHistoryLabels.afterUnit ?? "psi"}
+                    </td>
                     <td className="px-4 py-2">{event.downtime}</td>
                     <td className="px-4 py-2">
                       <span className="rounded-full bg-gradient-to-br from-slate-700 to-slate-900 px-2 py-1 text-xs text-white">
@@ -1816,7 +2030,7 @@ const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, on
         </div>
         {strainerOptions.length > 0 && (
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">Strainers</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">{chipLabel}</span>
             <div className="flex flex-wrap items-center gap-2">
               {strainerOptions.map((option) => {
                 const isSelected = option.id === selectedId;
@@ -1848,123 +2062,110 @@ const StrainerOverviewPanels = ({ strainer, strainerOptions = [], selectedId, on
   );
 };
 const useDashboardData = () => {
-  const [state, setState] = useState({
-    loading: true,
+  const [state] = useState(() => ({
+    loading: false,
     error: null,
     summary: null,
-    kpis: [],
-    explanation: null,
-    meta: null,
-  });
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      let summary = null;
-      let payload = MOCK_KPI_PAYLOAD;
-      try {
-        setState((prev) => ({ ...prev, loading: true, error: null }));
-        try {
-          const summaryResp = await apiFetch("/api/summary");
-          if (summaryResp.ok) {
-            summary = await summaryResp.json();
-          }
-        } catch (err) {
-          // summary optional for showcase
-        }
-        try {
-          const kpiResp = await apiFetch("/api/kpis");
-          if (kpiResp.ok) {
-            payload = await kpiResp.json();
-          } else if (kpiResp.status !== 404) {
-            throw new Error(`Failed to load KPI data (${kpiResp.status})`);
-          }
-        } catch (err) {
-          if (err?.message?.includes("Failed to load KPI data")) {
-            throw err;
-          }
-          // network failure or other fetch issue; fall back to mock payload
-        }
-        if (cancelled) return;
-        setState({
-          loading: false,
-          error: null,
-          summary,
-          kpis: payload.items || [],
-          explanation: payload.explanation || null,
-          meta: payload.meta || null,
-        });
-      } catch (error) {
-        if (cancelled) return;
-        setState((prev) => ({
-          ...prev,
-          loading: false,
-          error: error?.message || "Failed to load dashboard data.",
-          summary: summary ?? prev.summary,
-          kpis: payload.items || [],
-          explanation: payload.explanation || null,
-          meta: payload.meta || null,
-        }));
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    kpis: MOCK_KPI_PAYLOAD.items || [],
+    explanation: MOCK_KPI_PAYLOAD.explanation || null,
+    meta: MOCK_KPI_PAYLOAD.meta || null,
+  }));
   return state;
 };
 export default function App() {
   const { loading, error, summary, kpis, explanation, meta } = useDashboardData();
-  const realStrainer = useMemo(() => createRealStrainer(kpis, explanation, meta, summary), [kpis, explanation, meta, summary]);
-  const mockStrainers = useMemo(() => generateMockStrainerData(6), []);
-  const strainerFleet = useMemo(() => {
-    const base = [...mockStrainers];
-    if (realStrainer) {
-      return [realStrainer, ...base];
+  const [activeAssetKey, setActiveAssetKey] = useState("strainers");
+  const assetConfig = ASSET_CONFIGS[activeAssetKey];
+  const [assetMenuOpen, setAssetMenuOpen] = useState(false);
+  const realAsset = useMemo(() => {
+    if (activeAssetKey !== "strainers") return null;
+    return createRealStrainer(kpis, explanation, meta, summary);
+  }, [activeAssetKey, kpis, explanation, meta, summary]);
+  const mockAssets = useMemo(() => assetConfig.generateMockData(6), [assetConfig]);
+  const assetFleet = useMemo(() => {
+    const base = [...mockAssets];
+    if (realAsset) {
+      return [realAsset, ...base];
     }
     return base;
-  }, [mockStrainers, realStrainer]);
+  }, [mockAssets, realAsset]);
+  const assetOptions = useMemo(() => ASSET_ORDER.map((key) => ASSET_CONFIGS[key]), []);
+  const assetMenuRef = useRef(null);
+  useEffect(() => {
+    if (!assetMenuOpen) return;
+    const handleClick = (event) => {
+      if (!assetMenuRef.current) return;
+      if (!assetMenuRef.current.contains(event.target)) {
+        setAssetMenuOpen(false);
+      }
+    };
+    const handleKey = (event) => {
+      if (event.key === "Escape") {
+        setAssetMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keyup", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keyup", handleKey);
+    };
+  }, [assetMenuOpen]);
+  const handleAssetSelect = (nextKey) => {
+    setActiveAssetKey(nextKey);
+    setAssetMenuOpen(false);
+  };
+  const AssetIcon = assetConfig?.icon ?? Filter;
+  const heroTitle = assetConfig?.heroTitle ?? "Asset Command";
+  const heroBadge = assetConfig?.heroBadge ?? "Live Feed";
+  const heroTagline = assetConfig?.heroTagline ?? "Fleet performance dashboard";
   const [activeFilter, setActiveFilter] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedId, setSelectedId] = useState(null);
-  const filteredStrainers = useMemo(() => {
-    return strainerFleet.filter((strainer) => {
+  const filteredAssets = useMemo(() => {
+    return assetFleet.filter((asset) => {
       const matchesFilter =
-        activeFilter === "All" || strainer.status.toLowerCase() === activeFilter.toLowerCase();
+        activeFilter === "All" || asset.status.toLowerCase() === activeFilter.toLowerCase();
       const matchesSearch = searchTerm
-        ? [strainer.id, strainer.location.unit, strainer.location.pump]
+        ? [asset.id, asset.location.unit, asset.location.pump]
             .join(" ")
             .toLowerCase()
             .includes(searchTerm.toLowerCase())
         : true;
       return matchesFilter && matchesSearch;
     });
-  }, [strainerFleet, activeFilter, searchTerm]);
-  const selectedStrainer = useMemo(() => {
+  }, [assetFleet, activeFilter, searchTerm]);
+  const selectedAsset = useMemo(() => {
     if (!selectedId) {
       return null;
     }
-    return strainerFleet.find((s) => s.id === selectedId) || null;
-  }, [selectedId, strainerFleet]);
+    return assetFleet.find((s) => s.id === selectedId) || null;
+  }, [selectedId, assetFleet]);
 
   useEffect(() => {
-    if (filteredStrainers.length === 0) {
+    setActiveFilter("All");
+    setSearchTerm("");
+    setSelectedId(null);
+  }, [activeAssetKey]);
+
+  useEffect(() => {
+    if (filteredAssets.length === 0) {
       if (selectedId !== null) {
         setSelectedId(null);
       }
       return;
     }
-    if (!selectedId || !filteredStrainers.some((strainer) => strainer.id === selectedId)) {
-      setSelectedId(filteredStrainers[0].id);
+    if (!selectedId || !filteredAssets.some((asset) => asset.id === selectedId)) {
+      setSelectedId(filteredAssets[0].id);
     }
-  }, [filteredStrainers, selectedId]);
+  }, [filteredAssets, selectedId]);
   const fleetMetrics = useMemo(() => {
-    const criticalCount = strainerFleet.filter((s) => s.status === "alert").length;
-    const warningCount = strainerFleet.filter((s) => s.status === "warning").length;
-    const maintenanceDue7d = strainerFleet.filter((s) => s.trends.daysUntilCritical <= 7).length;
+    const criticalCount = assetFleet.filter((s) => s.status === "alert").length;
+    const warningCount = assetFleet.filter((s) => s.status === "warning").length;
+    const maintenanceDue7d = assetFleet.filter((s) => s.trends.daysUntilCritical <= 7).length;
     const avgEfficiency = (
-      strainerFleet.reduce((acc, s) => acc + s.currentMetrics.efficiency, 0) /
-      Math.max(strainerFleet.length, 1)
+      assetFleet.reduce((acc, s) => acc + s.currentMetrics.efficiency, 0) /
+      Math.max(assetFleet.length, 1)
     ).toFixed(1);
     const describeCountChange = (delta, basis) => {
       if (delta === 0) {
@@ -1974,7 +2175,7 @@ export default function App() {
       return `${Math.abs(delta)} ${direction} ${basis}`;
     };
     const criticalBaseline = meta?.alerts_fired ?? criticalCount;
-    const criticalDelta = realStrainer ? criticalCount - criticalBaseline : 0;
+    const criticalDelta = realAsset ? criticalCount - criticalBaseline : 0;
     const criticalTrend = {
       delta: criticalDelta,
       label: describeCountChange(criticalDelta, "vs last window"),
@@ -2012,7 +2213,7 @@ export default function App() {
       maintenanceTrend,
       efficiencyTrend,
     };
-  }, [strainerFleet, meta, realStrainer]);
+  }, [assetFleet, meta, realAsset]);
   return (
     <div className="min-h-screen bg-gradient-to-br from-neutral-950 via-slate-950 to-black text-neutral-100">
       <header className="sticky top-0 z-20 border-b border-white/5 bg-neutral-950/80 backdrop-blur-lg">
@@ -2020,18 +2221,59 @@ export default function App() {
           <div>
             <div className="flex items-center gap-3">
               <div className={`${ACCENT_GRADIENT} flex h-12 w-12 items-center justify-center rounded-2xl text-white shadow-lg`}>
-                <Filter size={24} />
+                <AssetIcon size={24} />
               </div>
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-gray-500">Jazan Refinery</p>
-                <h1 className="text-2xl font-bold text-white">Strainer Monitoring Command</h1>
+                <h1 className="text-2xl font-bold text-white">{heroTitle}</h1>
               </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-400">
               <span className={`${ACCENT_GRADIENT} rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white`}>
-                Live Feed
+                {heroBadge}
               </span>
-              <span>Refinery-wide strainer performance dashboard</span>
+              <span>{heroTagline}</span>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-gray-300">
+              <div className="relative" ref={assetMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setAssetMenuOpen((prev) => !prev)}
+                  className={`${GLASS_TILE} flex items-center gap-2 rounded-full px-4 py-2 font-semibold text-white transition`}
+                >
+                  <span>Assets</span>
+                  <ChevronDown
+                    size={16}
+                    className={`transition-transform ${assetMenuOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {assetMenuOpen && (
+                  <div className="absolute left-0 z-30 mt-2 w-60 rounded-2xl border border-white/10 bg-neutral-900/95 p-2 shadow-2xl">
+                    {assetOptions.map((option) => {
+                      const isActive = option.key === activeAssetKey;
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => handleAssetSelect(option.key)}
+                          className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${
+                            isActive
+                              ? "bg-white/10 text-white"
+                              : "text-gray-300 hover:bg-white/5 hover:text-white"
+                          }`}
+                        >
+                          <span>{option.navLabel}</span>
+                          {isActive && <CheckCircle size={16} className="text-emerald-400" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="text-xs uppercase tracking-wide text-gray-400">
+                Active:&nbsp;
+                <span className="text-white">{assetConfig.pluralLabel || "Assets"}</span>
+              </div>
             </div>
           </div>
           <div className={`flex items-center gap-4 text-sm ${GLASS_TILE} px-4 py-3`}>
@@ -2081,24 +2323,25 @@ export default function App() {
             trend={fleetMetrics.efficiencyTrend}
           />
         </section>
-        {selectedStrainer && (
+        {selectedAsset && (
           <section className="space-y-4">
             <StrainerOverviewPanels
-              strainer={selectedStrainer}
-              strainerOptions={filteredStrainers}
+              strainer={selectedAsset}
+              strainerOptions={filteredAssets}
               selectedId={selectedId}
               onSelectStrainer={setSelectedId}
+              assetConfig={assetConfig}
             />
           </section>
         )}
         <section className="flex min-h-[600px] flex-1 gap-6">
           <aside className={`flex min-h-0 w-full shrink-0 flex-col ${GLASS_CARD} p-5 text-sm lg:w-72 xl:w-80`}>
-            <div className="text-lg font-semibold text-white">Strainer Fleet</div>
+            <div className="text-lg font-semibold text-white">{assetConfig.fleetTitle || `${assetConfig.pluralLabel || "Asset"} Fleet`}</div>
             <div className="relative mt-4">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
                 className={`w-full py-2.5 pl-10 pr-4 text-sm transition ${INPUT_BASE}`}
-                placeholder="Search by ID, unit, pump..."
+                placeholder={assetConfig.searchPlaceholder || "Search assets..."}
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
               />
@@ -2116,38 +2359,40 @@ export default function App() {
                 >
                   {label} ({
                     label === "All"
-                      ? strainerFleet.length
-                      : strainerFleet.filter((s) => s.status.toLowerCase() === label.toLowerCase()).length
+                      ? assetFleet.length
+                      : assetFleet.filter((s) => s.status.toLowerCase() === label.toLowerCase()).length
                   })
                 </button>
               ))}
             </div>
             <div className="mt-5 flex-1 space-y-3 overflow-y-auto pr-1">
-              {filteredStrainers.map((strainer) => (
+              {filteredAssets.map((strainer) => (
                 <StrainerCard
                   key={strainer.id}
                   strainer={strainer}
                   onSelect={setSelectedId}
                   isSelected={selectedId === strainer.id}
+                  assetConfig={assetConfig}
                 />
               ))}
-              {filteredStrainers.length === 0 && (
+              {filteredAssets.length === 0 && (
                 <div className="flex flex-col items-center gap-2 py-10 text-gray-400">
                   <XCircle size={36} />
-                  <div className="text-sm font-semibold">No Strainers Found</div>
-                  <div className="text-xs">Try adjusting search or filters.</div>
+                  <div className="text-sm font-semibold">{assetConfig.emptyStateTitle || "No assets found"}</div>
+                  <div className="text-xs">{assetConfig.emptyStateSubtitle || "Try adjusting search or filters."}</div>
                 </div>
               )}
             </div>
           </aside>
           <section className={`flex-1 ${GLASS_CARD}`}>
             <StrainerDetailView
-              strainer={selectedStrainer}
+              strainer={selectedAsset}
               summary={summary}
               liveKpis={kpis}
               liveExplanation={explanation}
               liveMeta={meta}
-              fleet={strainerFleet}
+              fleet={assetFleet}
+              assetConfig={assetConfig}
             />
           </section>
         </section>
